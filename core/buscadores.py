@@ -1,0 +1,65 @@
+# buscadores.py
+from ddgs import DDGS
+
+
+class MultiSearchEngine:
+
+  def __init__(self, region: str = "es-es", safesearch: str = "moderate"):
+    """Inicializa el motor de búsqueda con parámetros personalizables."""
+    self.region = region
+    self.safesearch = safesearch
+
+  def search_engine_ddg_library(self, keyword: str, max_results: int) -> list:
+    """Buscador principal: Librería DuckDuckGo (DDGS) con manejo seguro de iteradores."""
+    urls = []
+    if not keyword or not keyword.strip():
+      return urls
+
+    try:
+      with DDGS() as ddgs:
+        # Usamos los parámetros óptimos de la librería actual
+        results = ddgs.text(
+            keyword.strip(),
+            region=self.region,
+            safesearch=self.safesearch,
+            max_results=max_results,
+        )
+
+        if results:
+          for r in results:
+            link = r.get("href")
+            if link and link.startswith(("http://", "https://")):
+              urls.append(link)
+
+    except Exception as e:
+      print(f"      [!] Error crítico en DuckDuckGo (DDGS): {e}")
+
+    return urls
+
+  def fetch_urls_with_fallbacks(self, keyword: str, max_results: int) -> list:
+    """Consulta los motores de búsqueda de forma robusta, depurando duplicados al vuelo."""
+    engine_name = "DuckDuckGo (Librería)"
+    print(f"  [*] Consultando motor: {engine_name} para: '{keyword}'...")
+
+    all_urls = []
+    seen = set()
+
+    try:
+      urls = self.search_engine_ddg_library(keyword, max_results)
+      added_count = 0
+
+      for u in urls:
+        if u not in seen:
+          seen.add(u)
+          all_urls.append(u)
+          added_count += 1
+
+      print(
+          f"      [+] {engine_name}: {len(urls)} resultados obtenidos,"
+          f" {added_count} únicos añadidos."
+      )
+    except Exception as e:
+      print(f"      [!] Fallo al procesar {engine_name}: {e}")
+
+    print(f"  [+] Total de enlaces únicos acumulados: {len(all_urls)}")
+    return all_urls
