@@ -1,10 +1,13 @@
 # core/categorias.py
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .procesador import WebProcessor
 
 
 def run_category_scraping(selected_category: str, urls_to_scrape: list, stop_event=None):
-  """Ejecuta el scraping y fraccionamiento para cualquier categoría de forma unificada."""
+  """Ejecuta el scraping y fraccionamiento para cualquier categoría de forma unificada.
+  Usa hilos concurrentes para acelerar las descargas de páginas.
+  """
   processor = WebProcessor()
   cat_lower = selected_category.lower()
 
@@ -22,7 +25,7 @@ def run_category_scraping(selected_category: str, urls_to_scrape: list, stop_eve
 
   print(
       f"[🚀] Extracción para '{selected_category.upper()}'"
-      f" ({len(urls_to_scrape)} fuentes)..."
+      f" ({len(urls_to_scrape)} fuentes) [modo paralelo]..."
   )
   start_time = time.time()
   total_chars = 0
@@ -36,35 +39,48 @@ def run_category_scraping(selected_category: str, urls_to_scrape: list, stop_eve
   )
   current_lines_in_file = 2
 
-  for url in urls_to_scrape:
+  max_workers = min(8, max(2, len(urls_to_scrape)))
+
+  def _scrape_one(url):
     if stop_event and stop_event.is_set():
-      print("[!] Proceso detenido por el usuario.")
-      break
+      return url, ""
+    return url, processor.scrape_url(url)
 
-    content = processor.scrape_url(url)
+  with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    futures = {executor.submit(_scrape_one, url): url for url in urls_to_scrape}
 
-    if stop_event and stop_event.is_set():
-      print("[!] Proceso detenido por el usuario.")
-      break
+    for future in as_completed(futures):
+      if stop_event and stop_event.is_set():
+        print("[!] Proceso detenido por el usuario.")
+        # Cancel remaining futures best-effort
+        for f in futures:
+          f.cancel()
+        break
 
-    if content:
-      source_block = f"\n\n--- FUENTE: {url} ---\n\n{content}"
-      block_lines = source_block.splitlines()
+      try:
+        url, content = future.result()
+      except Exception as e:
+        print(f"      [!] Error en hilo: {e}")
+        continue
 
-      if current_lines_in_file + len(block_lines) > max_lines_per_file:
-        f_out.close()
-        part_num += 1
-        current_output_filename = f"{base_filename}_part_{part_num}.txt"
-        f_out = open(current_output_filename, "w", encoding="utf-8")
-        f_out.write(
-            f"=== DATASET: {selected_category.upper()} (Parte {part_num}) ===\n\n"
-        )
-        current_lines_in_file = 2
+      if content:
+        source_block = f"\n\n--- FUENTE: {url} ---\n\n{content}"
+        block_lines = source_block.splitlines()
 
-      f_out.write(source_block)
-      current_lines_in_file += len(block_lines)
-      total_chars += len(content)
-      print(f"      [+] Extraído con éxito de: {url}")
+        if current_lines_in_file + len(block_lines) > max_lines_per_file:
+          f_out.close()
+          part_num += 1
+          current_output_filename = f"{base_filename}_part_{part_num}.txt"
+          f_out = open(current_output_filename, "w", encoding="utf-8")
+          f_out.write(
+              f"=== DATASET: {selected_category.upper()} (Parte {part_num}) ===\n\n"
+          )
+          current_lines_in_file = 2
+
+        f_out.write(source_block)
+        current_lines_in_file += len(block_lines)
+        total_chars += len(content)
+        print(f"      [+] Extraído con éxito de: {url}")
 
   f_out.close()
   print(

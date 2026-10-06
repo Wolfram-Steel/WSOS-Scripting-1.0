@@ -39,7 +39,7 @@ class ScraperUI:
 
   def build_layout(self):
     banner_text = ft.Text(
-        "WSOS SCRIPTING 1.0",
+        "WSOS SCRIPTING 1.1",
         size=20,
         weight=ft.FontWeight.BOLD,
         color=ft.Colors.RED_700,
@@ -169,13 +169,6 @@ class ScraperUI:
         disabled=True,
     )
 
-    self.btn_optimizer = ft.ElevatedButton(
-        content=ft.Text("JSON Optimizer", color=ft.Colors.WHITE),
-        icon="cleaning_services",
-        bgcolor=ft.Colors.GREEN_700,
-        on_click=self.run_optimizer,
-    )
-
     self.btn_open_folder = ft.ElevatedButton(
         content=ft.Text("Abrir Carpeta", color=ft.Colors.WHITE),
         icon="folder_open",
@@ -183,12 +176,11 @@ class ScraperUI:
         on_click=self.open_output_folder,
     )
 
-    # Barra de acciones limpia sin rastro de IA
+    # Barra de acciones
     action_buttons = ft.Row(
         controls=[
             self.btn_run,
             self.btn_stop,
-            self.btn_optimizer,
             self.btn_open_folder,
         ],
         spacing=10,
@@ -453,7 +445,6 @@ class ScraperUI:
 
     self.stop_event.clear()
     self.btn_run.disabled = True
-    self.btn_optimizer.disabled = True
     self.btn_open_folder.disabled = True
     self.btn_stop.disabled = False
     self.progress_bar.visible = True
@@ -472,20 +463,6 @@ class ScraperUI:
     threading.Thread(target=restore_btn_scale, daemon=True).start()
     threading.Thread(
         target=self._execute_task, args=(choice,), daemon=True
-    ).start()
-
-  def run_optimizer(self, e):
-    self.stop_event.clear()
-    self.btn_run.disabled = True
-    self.btn_optimizer.disabled = True
-    self.btn_open_folder.disabled = True
-    self.btn_stop.disabled = False
-    self.progress_bar.visible = True
-    self.progress_bar.value = None
-    self.page.update()
-
-    threading.Thread(
-        target=self._execute_optimization_task, daemon=True
     ).start()
 
   def stop_process(self, e):
@@ -534,11 +511,6 @@ class ScraperUI:
           save_category=target_category,
       )
 
-  def _execute_optimization_task(self):
-    self._run_with_captured_stdout(
-        lambda: self.scraper.optimize_webs_json(self.stop_event)
-    )
-
   def _run_with_captured_stdout(self, target_func):
     class StreamRedirector(io.TextIOBase):
 
@@ -578,7 +550,6 @@ class ScraperUI:
       sys.stderr = old_stderr
       self.progress_bar.visible = False
       self.btn_run.disabled = False
-      self.btn_optimizer.disabled = False
       self.btn_open_folder.disabled = False
       self.btn_stop.disabled = True
       self.btn_run.scale = 1.0
