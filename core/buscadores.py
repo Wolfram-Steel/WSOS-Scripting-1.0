@@ -3,6 +3,7 @@ from ddgs import DDGS
 
 
 class MultiSearchEngine:
+  """Motor de búsqueda thread-safe: cada llamada crea su propia sesión DDGS."""
 
   def __init__(self, region: str = "es-es", safesearch: str = "moderate"):
     """Inicializa el motor de búsqueda con parámetros personalizables."""
@@ -10,14 +11,17 @@ class MultiSearchEngine:
     self.safesearch = safesearch
 
   def search_engine_ddg_library(self, keyword: str, max_results: int) -> list:
-    """Buscador principal: Librería DuckDuckGo (DDGS) con manejo seguro de iteradores."""
+    """Buscador principal: Librería DuckDuckGo (DDGS).
+
+    Cada invocación abre y cierra su propia sesión DDGS, lo que permite
+    ejecutar varias búsquedas en paralelo (búsqueda anidada) sin conflictos.
+    """
     urls = []
     if not keyword or not keyword.strip():
       return urls
 
     try:
       with DDGS() as ddgs:
-        # Usamos los parámetros óptimos de la librería actual
         results = ddgs.text(
             keyword.strip(),
             region=self.region,

@@ -1,10 +1,18 @@
 # scraping.py
 import json
 import os
+import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import time
+import requests
 
 from core import bloqueos, buscadores, categorias
+
+# Workers concurrentes para búsqueda anidada (keywords en paralelo)
+MAX_SEARCH_WORKERS = 8
+# Workers concurrentes para descarga de páginas (dataset / categorías)
+MAX_SCRAPE_WORKERS = 6
 
 
 # Habilitar soporte para colores ANSI en la terminal de Windows
@@ -80,6 +88,66 @@ class IntegratedCodeScraper:
         json.dump(data, f, indent=4, ensure_ascii=False)
       print(f"[+] Se han guardado {added} URLs nuevas directamente en la categoría '{cat_key}' del JSON.")
 
+  def optimize_webs_json(self, stop_event=None):
+    """Verifica todas las URLs del JSON, hace un respaldo y elimina las rotas (404, etc.)."""
+    if not self.config_file.exists():
+      print(f"[!] No se encuentra el archivo '{self.config_file}'.")
+      return
+
+    bak_file = self.config_file.with_suffix(".json.bak")
+    shutil.copy(self.config_file, bak_file)
+    print(f"[*] Copia de seguridad creada en: {bak_file}")
+
+    data = self.load_config()
+    optimized_data = {}
+    total_checked = 0
+    total_removed = 0
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        )
+    }
+
+    for category, urls in data.items():
+      if stop_event and stop_event.is_set():
+        print("[!] Optimización detenida por el usuario.")
+        break
+
+      print(f"\n[🔍] Verificando categoría: {category.upper()}")
+      valid_urls = []
+      for url in urls:
+        if stop_event and stop_event.is_set():
+          break
+        total_checked += 1
+        try:
+          res = requests.head(
+              url, headers=headers, timeout=5, allow_redirects=True
+          )
+          if res.status_code == 405:  # Si HEAD no está permitido, probamos GET
+            res = requests.get(url, headers=headers, timeout=5, stream=True)
+            res.close()
+
+          if res.status_code < 400:
+            print(f"  [✔] OK ({res.status_code}): {url}")
+            valid_urls.append(url)
+          else:
+            print(f"  [✘] Rota/Error ({res.status_code}): {url}")
+            total_removed += 1
+        except Exception as e:
+          print(f"  [✘] Error de conexión: {url}")
+          total_removed += 1
+
+      optimized_data[category] = valid_urls
+
+    with open(self.config_file, "w", encoding="utf-8") as f:
+      json.dump(optimized_data, f, indent=4, ensure_ascii=False)
+
+    print(
+        f"\n[+] Optimización finalizada. URLs revisadas: {total_checked} |"
+        f" Eliminadas: {total_removed}"
+    )
+
   def search_custom_gui(
       self,
       output_filename,
@@ -141,22 +209,47 @@ class IntegratedCodeScraper:
     all_found_urls = []
 
     print(
-        f"[*] Iniciando búsqueda personalizada [Región: {region}] "
+        f"[*] Iniciando búsqueda ANIDADA (paralela) [Región: {region}] "
         f"(Modo WSOS: {'ACTIVADO' if wsos_mode else 'DESACTIVADO'} | "
         f"Búsqueda Sucia: {'ACTIVADA' if dirty_mode else 'DESACTIVADA'})"
     )
 
     max_res = 15 if dirty_mode else (10 if wsos_mode else 5)
+    workers = min(MAX_SEARCH_WORKERS, max(1, len(keywords_list)))
+    print(
+        f"[⚡] Búsqueda anidada: {len(keywords_list)} términos "
+        f"con {workers} workers concurrentes..."
+    )
 
-    for kw in keywords_list:
+    def _search_one(kw: str) -> list:
+      """Worker: lanza una consulta DDGS independiente por keyword."""
       if stop_event and stop_event.is_set():
-        print("[!] Búsqueda detenida por el usuario.")
-        break
-
-      urls = self.search_engine.fetch_urls_with_fallbacks(
-          kw, max_results=max_res
+        return []
+      # Cada hilo usa su propia instancia de motor para evitar conflictos
+      engine = buscadores.MultiSearchEngine(
+          region=region, safesearch=self.search_engine.safesearch
       )
-      all_found_urls.extend(urls)
+      return engine.fetch_urls_with_fallbacks(kw, max_results=max_res)
+
+    # --- Búsqueda anidada: todas las keywords en paralelo ---
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+      future_map = {
+          executor.submit(_search_one, kw): kw for kw in keywords_list
+      }
+      for future in as_completed(future_map):
+        if stop_event and stop_event.is_set():
+          # Cancelar pendientes y salir
+          for f in future_map:
+            f.cancel()
+          print("[!] Búsqueda detenida por el usuario.")
+          break
+        kw = future_map[future]
+        try:
+          urls = future.result()
+          all_found_urls.extend(urls)
+          print(f"  [✔] Término completado: '{kw}' → {len(urls)} enlaces")
+        except Exception as exc:
+          print(f"  [!] Error en término '{kw}': {exc}")
 
     # Aplicar filtrado o saltarlo por completo según la Búsqueda Sucia
     if dirty_mode:
@@ -203,56 +296,60 @@ class IntegratedCodeScraper:
       else:
         print(f"[+] Se han guardado {added_count} URLs nuevas en la categoría '{cat_key}' del JSON.")
 
-    # 2. PROCESAMIENTO DE DATASET (Activado tanto para WSOS como para Búsqueda Sucia)
+    # 2. PROCESAMIENTO DE DATASET (paralelo: descarga anidada de páginas)
     total_chars_dataset = 0
     if (wsos_mode or dirty_mode) and clean_urls:
       mode_label = "WSOS" if wsos_mode else "BÚSQUEDA SUCIA"
-      print(f"[🚀 {mode_label}] Iniciando Pipeline de Conversión Estructurada a Dataset [paralelo]...")
-      from concurrent.futures import ThreadPoolExecutor, as_completed
+      print(
+          f"[🚀 {mode_label}] Pipeline de Dataset en paralelo "
+          f"({min(MAX_SCRAPE_WORKERS, len(clean_urls))} workers)..."
+      )
       from core.procesador import WebProcessor
 
       processor = WebProcessor()
       dataset_filename = f"dataset_{'wsos' if wsos_mode else 'dirty'}_{output_filename}"
-      max_workers = min(8, max(2, len(clean_urls)))
 
-      def _scrape_one(url):
+      def _scrape_one(url: str):
         if stop_event and stop_event.is_set():
           return url, ""
         return url, processor.scrape_url(url)
+
+      results = []
+      scrape_workers = min(MAX_SCRAPE_WORKERS, max(1, len(clean_urls)))
+      with ThreadPoolExecutor(max_workers=scrape_workers) as executor:
+        futures = {
+            executor.submit(_scrape_one, url): url for url in clean_urls
+        }
+        for future in as_completed(futures):
+          if stop_event and stop_event.is_set():
+            for f in futures:
+              f.cancel()
+            print("[!] Pipeline detenido por el usuario.")
+            break
+          try:
+            results.append(future.result())
+          except Exception as exc:
+            url = futures[future]
+            print(f"  [!] Error al raspar {url}: {exc}")
+            results.append((url, ""))
 
       with open(dataset_filename, "w", encoding="utf-8") as ds_file:
         ds_file.write(
             f"=== DATASET AUTOMÁTICO {mode_label} - KEYWORDS: {raw_keywords} ===\n\n"
         )
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-          futures = {
-              executor.submit(_scrape_one, url): url for url in clean_urls
-          }
-          for future in as_completed(futures):
-            if stop_event and stop_event.is_set():
-              print("[!] Pipeline detenido por el usuario.")
-              for f in futures:
-                f.cancel()
-              break
-            try:
-              url, content = future.result()
-            except Exception as e:
-              print(f"  [!] Error en hilo: {e}")
-              continue
-
-            if content and len(content) > 300:
-              ds_file.write(f"\n\n--- FUENTE VALIDADA: {url} ---\n\n{content}")
-              total_chars_dataset += len(content)
-              print(
-                  f"  [✔ {mode_label} Relevante] Contenido integrado"
-                  f" ({len(content)} caracteres)."
-              )
-            else:
-              print(
-                  f"  [✘ {mode_label} Descartado] Contenido insuficiente o poco relevante:"
-                  f" {url}"
-              )
+        for url, content in results:
+          if content and len(content) > 300:
+            ds_file.write(f"\n\n--- FUENTE VALIDADA: {url} ---\n\n{content}")
+            total_chars_dataset += len(content)
+            print(
+                f"  [✔ {mode_label} Relevante] Contenido integrado"
+                f" ({len(content)} caracteres)."
+            )
+          else:
+            print(
+                f"  [✘ {mode_label} Descartado] Contenido insuficiente o poco relevante:"
+                f" {url}"
+            )
 
       print(
           f"[+] ¡Dataset {mode_label} generado con éxito en"

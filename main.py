@@ -5,7 +5,7 @@ from ui import ScraperUI
 
 def main(page: ft.Page):
   # Configuraciones globales opcionales
-  page.title = "WSOS SCRIPTING 1.0"
+  page.title = "WSOS SCRIPTING 1.11"
   page.theme_mode = ft.ThemeMode.DARK
 
   # Instanciamos la interfaz gráfica principal

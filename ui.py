@@ -39,7 +39,7 @@ class ScraperUI:
 
   def build_layout(self):
     banner_text = ft.Text(
-        "WSOS SCRIPTING 1.1",
+        "WSOS SCRIPTING 1.11",
         size=20,
         weight=ft.FontWeight.BOLD,
         color=ft.Colors.RED_700,

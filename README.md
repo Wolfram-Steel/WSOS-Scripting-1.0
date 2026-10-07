@@ -1,251 +1,341 @@
-Read this in English (#english) | Leer en Español (#espanol)
+# WSOS Scripting 1.11
+
+**Herramienta de escritorio para búsqueda inteligente de enlaces técnicos y extracción limpia de contenido web.**
+
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![Flet](https://img.shields.io/badge/UI-Flet-purple)](https://flet.dev/)
+[![License](https://img.shields.io/badge/License-Educational-orange)](#aviso-legal)
+[![Version](https://img.shields.io/badge/Version-1.11-red)](CHANGELOG.md)
+[![Concurrency](https://img.shields.io/badge/Search-Nested%20Parallel-brightgreen)](CHANGELOG.md)
+
+> **Autor:** Wolfram Steel  
+> **Idioma de la interfaz:** Español  
+> **Plataforma:** Multiplataforma (Windows / Linux / macOS)
 
 ---
 
-# Versión en Español
+## Tabla de contenidos
 
-## WSOS Scripting 1.1
-
-**Autor:** Wolfram Steel
-
-¡Hola! Qué gusto tenerte por aquí. Si alguna vez te has visto en la tediosa tarea de rebuscar información técnica por la web, recopilar enlaces a mano y preparar datasets limpios para tus proyectos o bases de conocimiento, sabrás perfectamente lo frustrante y lento que llega a ser.
-
-WSOS Scripting 1.1 nace precisamente para quitarte ese dolor de cabeza. Es una herramienta de escritorio ligera, rápida y muy cómoda para automatizar todo ese flujo de trabajo sin perder el control en ningún momento.
-
----
-
-### ✨ Novedades de la Versión 1.1
-
-* **Limpieza e Higienización Automática de JSON:** Automatización completa en el procesamiento de webs.json para eliminar registros nulos, vacíos o corruptos al gestionar categorías de componentes y búsquedas.
-
-
-* **Gestión Antibloqueos Avanzada:** Módulo core/bloqueos.py optimizado para mitigar la detección e interrupciones por IP durante las fases de scraping masivo.
-
-
-* **Optimizaciones de Rendimiento y Estabilidad:** Tiempos de respuesta reducidos y mejor análisis en core/procesador.py y core/buscawebs.py, mejorando el tratamiento de HTML y bloques de código.
-
-
-* **Interfaz Gráfica Sincronizada:** Actualización del entorno visual a WSOS SCRIPTING 1.1, garantizando máxima coherencia y fluidez con el nuevo flujo de trabajo.
-
-
+- [Descripción](#descripción)
+- [Novedades de la versión 1.11](#novedades-de-la-versión-111)
+- [Características principales](#características-principales)
+- [Arquitectura del proyecto](#arquitectura-del-proyecto)
+- [Requisitos](#requisitos)
+- [Instalación rápida](#instalación-rápida)
+- [Guía de uso](#guía-de-uso)
+- [Modos de búsqueda avanzados](#modos-de-búsqueda-avanzados)
+- [Búsqueda anidada (paralela)](#búsqueda-anidada-paralela)
+- [Flujo de trabajo recomendado](#flujo-de-trabajo-recomendado)
+- [Estructura de archivos generados](#estructura-de-archivos-generados)
+- [Configuración (`webs.json`)](#configuración-websjson)
+- [Ajuste de rendimiento](#ajuste-de-rendimiento)
+- [Solución de problemas](#solución-de-problemas)
+- [Aviso legal](#aviso-legal)
+- [English summary](#english-summary)
 
 ---
 
-### ¿Qué puedes hacer con esta herramienta?
+## Descripción
 
-* **Interfaz Gráfica Moderna (Flet):** Olvídate de estar atado a la consola si no te apetece. Disfrutas de un panel visual en modo oscuro muy cuidado, con una consola en tiempo real que te muestra el paso a paso y un botón directo para abrir la carpeta de resultados. Además, puedes detener cualquier proceso de forma segura en plena ejecución.
-* **Búsqueda Multirregión Inteligente:** Se conecta a DuckDuckGo adaptándose a la región que elijas (España, Estados Unidos, UK o Global). Todo ello acompañado de un filtro estricto que barre la publicidad, rastreadores y parámetros molestos como utm, gclid o fbclid.
+**WSOS Scripting** automatiza el ciclo completo de recopilación de información técnica:
 
----
+1. **Búsqueda** de enlaces relevantes mediante DuckDuckGo (multi-región).
+2. **Filtrado** estricto de publicidad, rastreadores y parámetros de tracking.
+3. **Organización** de URLs en categorías persistentes (`webs.json`).
+4. **Extracción** de contenido limpio (HTML → texto estructurado), preservando bloques de código.
+5. **Generación** de datasets por lotes listos para bases de conocimiento, RAG o análisis posterior.
 
-### Guía de uso paso a paso
-
-1. **Crear una categoría previa:** Se recomienda encarecidamente que, antes de realizar tu primera búsqueda web, hagas clic en el botón morado de Categorías (arriba a la derecha en la interfaz) y crees una categoría (por ejemplo, llamada prueba). Esto es necesario para poder asociar y guardar las webs encontradas en el archivo JSON saneado.
-2. **Configurar la Búsqueda Web:**
-* En el desplegable superior, selecciona la opción **Búsqueda webs**.
-* Escribe tus palabras clave separadas por comas (por ejemplo: python, flet).
-* Asigna un nombre al archivo txt de salida (este archivo servirá como copia de respaldo externa al JSON con los enlaces encontrados).
-* Selecciona la región geográfica donde quieres realizar la búsqueda.
-* Elige la categoría de destino obligatoria que creaste antes (en este caso, prueba).
-* En las casillas inferiores, elige uno de los dos modos avanzados disponibles:
-* **Modo WSOS:** Amplía automáticamente tus palabras clave añadiendo modificadores técnicos (github, documentation, tutorial, etc.) para forzar la obtención de código y guías de alto valor, validando el contenido al vuelo y generando un dataset limpio (dataset_wsos_archivo.txt).
-* **Búsqueda Sucia:** Ideal para cuando necesitas un aluvión masivo de enlaces y referencias sin filtros estrictos.
-
-
-
-
-3. **Ejecutar y Procesar:** Pulsa el botón rojo de **Ejecutar Proceso** y observa la consola. Una vez finalizado, las webs se habrán guardado y limpiado automáticamente bajo tu categoría prueba.
-
-
-4. **Extraer el contenido:** Para completar el ciclo de información, selecciona ahora tu categoría (prueba) en el desplegable principal de la interfaz y dale a ejecutar. El sistema recorrerá las webs guardadas y generará archivos txt con todo su contenido estructurado por lotes.
+Todo desde una interfaz gráfica moderna en modo oscuro, con consola de logs en tiempo real, control de parada segura y **búsqueda anidada en paralelo** para maximizar la velocidad.
 
 ---
 
-### Puesta en marcha en 1 clic
+## Novedades de la versión 1.11
 
-Para ahorrarte dolores de instalación, cuentas con un script auto-configurador:
+| Cambio | Descripción |
+|--------|-------------|
+| **Búsqueda anidada (paralela)** | Las keywords ya no se consultan una a una: hasta **8 workers** lanzan consultas DuckDuckGo a la vez. |
+| **Dataset en paralelo** | La descarga de páginas para `dataset_wsos_*` / `dataset_dirty_*` usa hasta **6 workers** concurrentes. |
+| **Categorías en paralelo** | La extracción de contenido por categoría descarga hasta **6 URLs** simultáneas; la escritura a disco sigue ordenada y particionada. |
+| **Motor thread-safe** | Cada hilo abre su propia sesión `DDGS`, evitando conflictos en búsquedas concurrentes. |
+| **Versionado** | Banner y título de ventana: **WSOS SCRIPTING 1.11**. |
 
-1. Clona o descarga este repositorio en tu ordenador.
-2. Abre tu terminal en la carpeta del proyecto y ejecuta:
+> Historial completo en [CHANGELOG.md](CHANGELOG.md).
+
+### Resumen de versiones anteriores
+
+| Versión | Enfoque |
+|---------|---------|
+| **1.0** | Lanzamiento: UI Flet, búsqueda multi-región, Modo WSOS, Búsqueda Sucia, categorías, optimizer en UI. |
+| **1.1** | UI más limpia: eliminación del botón JSON Optimizer de la barra de acciones. |
+| **1.11** | Rendimiento: búsqueda y scraping anidados en paralelo. |
+
+---
+
+## Características principales
+
+| Característica | Detalle |
+|----------------|---------|
+| **Interfaz Flet** | Modo oscuro, consola en vivo, barra de progreso y botones con animación. |
+| **Búsqueda multi-región** | España (`es-es`), USA (`us-en`), UK (`uk-en`) y Global (`wt-wt`). |
+| **Búsqueda anidada** | Keywords en paralelo (hasta 8 hilos) con parada segura. |
+| **Filtro de URLs** | Bloqueo de dominios publicitarios y eliminación de `utm_*`, `gclid`, `fbclid`, `mscclkid`, etc. |
+| **Modo WSOS** | Expansión semántica de keywords + validación de contenido útil + `dataset_wsos_*.txt`. |
+| **Búsqueda Sucia** | Expansión masiva de términos + sin filtros de tracking → máximo volumen de enlaces. |
+| **Gestión de categorías** | Crear / eliminar desde diálogo modal; persistencia en `webs.json`. |
+| **Extracción inteligente** | BeautifulSoup + limpieza de ruido, preservando bloques de código Markdown. |
+| **Scraping paralelo** | Hasta 6 descargas HTTP concurrentes en datasets y categorías. |
+| **Salida por lotes** | Archivos `*_part_N.txt` (~500 líneas) para datasets grandes. |
+| **Parada segura** | `threading.Event` interrumpe búsquedas y scrapings en cualquier momento. |
+| **Auto-configurador** | `actualizador.py` instala dependencias y crea plantilla de `webs.json`. |
+
+---
+
+## Arquitectura del proyecto
+
+```
+WSOS Scripting/
+├── main.py                 # Punto de entrada (Flet)
+├── ui.py                   # Interfaz gráfica, hilos y captura de stdout
+├── scraping.py             # Orquestador (búsqueda anidada + categorías + dataset)
+├── actualizador.py         # Instalador de dependencias + plantilla webs.json
+├── webs.json               # Persistencia de categorías y URLs
+├── core/
+│   ├── __init__.py
+│   ├── buscadores.py       # Motor DuckDuckGo (DDGS) thread-safe
+│   ├── bloqueos.py         # Filtro de dominios y trackers
+│   ├── buscawebs.py        # Búsqueda auxiliar (legado)
+│   ├── procesador.py       # Descarga HTML → texto limpio + código
+│   └── categorias.py       # Scraping paralelo por categoría + particionado
+├── README.md
+└── CHANGELOG.md
+```
+
+**Flujo de datos (v1.11):**
+
+```
+Usuario (UI)
+    │
+    ├─► Búsqueda webs
+    │       │
+    │       ▼
+    │   Keywords expandidas (WSOS / Sucia / estándar)
+    │       │
+    │       ▼
+    │   ThreadPoolExecutor (hasta 8 workers)
+    │       ├── DDGS keyword 1
+    │       ├── DDGS keyword 2
+    │       └── DDGS keyword N   ← en paralelo
+    │       │
+    │       ▼
+    │   URLFilter → webs.json + .txt
+    │   (+ dataset paralelo si WSOS/Sucia)
+    │
+    └─► Categoría X
+            │
+            ▼
+        ThreadPoolExecutor (hasta 6 workers)
+            ├── scrape URL 1
+            ├── scrape URL 2
+            └── scrape URL N
+            │
+            ▼
+        *_part_N.txt (escritura ordenada)
+```
+
+---
+
+## Requisitos
+
+- **Python** 3.10 o superior
+- Conexión a Internet
+- Dependencias (instaladas por `actualizador.py`):
+  - `flet`
+  - `requests`
+  - `beautifulsoup4`
+  - `ddgs`
+
+---
+
+## Instalación rápida
+
+```bash
+# 1. Clonar o descargar el repositorio
+git clone <url-del-repositorio>
+cd <carpeta-del-proyecto>
+
+# 2. Configurar entorno (dependencias + webs.json de ejemplo)
 python3 actualizador.py
-Este script comprobará las dependencias necesarias (flet, requests, beautifulsoup4, ddgs) y creará una plantilla base de webs.json si no la encuentra.
 
-
-
----
-
-### ¿Cómo arrancar la aplicación?
-
-Una vez completado el paso anterior, lanza la interfaz gráfica ejecutando:
+# 3. Lanzar la aplicación
 python3 main.py
+```
+
+El script `actualizador.py` genera `instalacion_log.txt` con el historial de la configuración.
 
 ---
 
-### Estructura del proyecto
+## Guía de uso
 
-* actualizador.py: Auto-configurador del entorno, dependencias y plantilla JSON.
+### 1. Crear una categoría (obligatorio antes de buscar)
 
+1. Pulsa el botón morado **Categorías** (arriba a la derecha).
+2. Escribe un nombre (ej. `python_docs`, `cpu`, `electronica`).
+3. Pulsa **Añadir** y cierra el panel.
 
-* main.py: Punto de entrada ligero que inicializa la ventana de Flet.
+### 2. Búsqueda de webs
 
+1. En **Selecciona la Operación** elige **Búsqueda webs**.
+2. Rellena keywords, archivo `.txt` de salida, región y categoría de destino.
+3. (Opcional) Activa **Modo WSOS** o **Búsqueda Sucia** (excluyentes).
+4. Pulsa **Ejecutar Proceso** y observa la consola: verás términos completándose en paralelo.
+5. Puedes detener en cualquier momento con **Detener Proceso**.
 
-* ui.py: Interfaz gráfica (v1.1), gestión de hilos y consola de logs en tiempo real.
+### 3. Extracción de contenido de una categoría
 
+1. Selecciona la categoría en el desplegable principal.
+2. Pulsa **Ejecutar Proceso**.
+3. Se generan archivos `categoria_part_1.txt`, `categoria_part_2.txt`, …
 
-* scraping.py: Orquestador principal de la lógica de negocio y tareas.
+### 4. Abrir carpeta de resultados
 
-
-* webs.json: Base de datos local en JSON, optimizada con limpieza automática en la v1.1.
-
-
-* **Módulos core/**:
-
-
-* buscadores.py / buscawebs.py: Pasarela de comunicación con buscadores.
-
-
-* bloqueos.py: Filtros avanzados antibloqueo y desinfección de rastreadores.
-
-
-* procesador.py: Procesador HTML inteligente que aísla el ruido y cuida el formato de código.
-
-
-* categorias.py: Lógica para procesar y purgar categorías por lotes.
-
-
-
-
+El botón **Abrir Carpeta** abre el directorio de trabajo del proyecto.
 
 ---
 
-### ¡AVISO LEGAL!
+## Modos de búsqueda avanzados
 
-El autor no se hace responsable del mal uso de esta herramienta. Este software ha sido diseñado strictly con fines educativos, de investigación y para la automatización de flujos de desarrollo personales. Es responsabilidad de quien lo utiliza cumplir con los términos de servicio de los sitios web consultados y las leyes aplicables.
+| Modo | Qué hace | Cuándo usarlo |
+|------|----------|---------------|
+| **Estándar** | Keywords tal cual + filtro de trackers. ~5 resultados/término. | Búsquedas precisas. |
+| **Modo WSOS** | Expande con `documentation`, `github`, `tutorial`, `source code`, `examples`. Valida contenido (>300 caracteres). Genera `dataset_wsos_*.txt`. | Datasets técnicos de calidad. |
+| **Búsqueda Sucia** | Expande con ~20 sufijos. Sin filtro de trackers. Genera `dataset_dirty_*.txt`. | Máximo volumen de enlaces. |
 
-¡Espero que te sea de gran utilidad en tu día a día! Si te mola, no dudes en adaptarlo a tus necesidades.
-
----
-
----
-
-# English Version
-
-## WSOS Scripting 1.1
-
-**Author:** Wolfram Steel
-
-Hello! If you have ever found yourself in the tedious task of searching the web for technical information, manually gathering links, and preparing clean datasets for your projects or knowledge bases, you know perfectly well how frustrating and slow it can be.
-
-WSOS Scripting 1.1 was built precisely to take away that headache. It is a lightweight, fast, and very comfortable desktop tool designed to automate that entire workflow without ever losing control.
+En **1.11**, tanto WSOS como Búsqueda Sucia se benefician especialmente de la búsqueda anidada: más términos = más ganancia de velocidad.
 
 ---
 
-### ✨ What's New in Version 1.1
+## Búsqueda anidada (paralela)
 
-* **Automated JSON Sanitization & Cleaning:** Full automation when processing webs.json to purge null, empty, or corrupted records when managing categories and search results.
+A partir de la **1.11**, el cuello de botella secuencial desaparece:
 
+| Fase | Workers por defecto | Archivo |
+|------|---------------------|---------|
+| Consultas DuckDuckGo por keyword | **8** | `scraping.py` → `MAX_SEARCH_WORKERS` |
+| Descarga de páginas (dataset WSOS/Sucia) | **6** | `scraping.py` → `MAX_SCRAPE_WORKERS` |
+| Extracción de categoría | **6** | `core/categorias.py` → `MAX_CATEGORY_WORKERS` |
 
-* **Enhanced Anti-Blocking Controls:** Optimized core/bloqueos.py module to mitigate IP detection and interruptions during large scraping passes.
-
-
-* **Performance & Stability Enhancements:** Improved execution speed and better HTML parsing in core/procesador.py and core/buscawebs.py, optimizing code snippet preservation.
-
-
-* **UI Refresh:** Full visual alignment to WSOS SCRIPTING 1.1 within the Flet frontend, ensuring seamless integration with the updated backend.
-
-
+Cada worker de búsqueda crea su propia instancia de `MultiSearchEngine` / sesión `DDGS`.  
+La parada del usuario cancela futures pendientes de forma segura.
 
 ---
 
-### What can you do with this tool?
+## Flujo de trabajo recomendado
 
-* **Modern Graphical Interface (Flet):** Forget about being tied to a plain console. Enjoy a carefully crafted dark-mode visual panel featuring a real-time log console and a direct button to open the results folder in your local file explorer. Plus, you can safely stop any running process mid-execution thanks to thread control.
-* **Smart Multi-Region Search:** Connects directly to DuckDuckGo, adapting to your chosen region (Spain, USA, UK, or Global), backed by a strict filter that clears out ads, trackers, and annoying parameters like utm, gclid, or fbclid.
-
----
-
-### Step-by-Step Usage Guide
-
-1. **Create a Category First:** It is highly recommended to click the purple **Categories** button at the top right of the interface and create a category (e.g., named test) before running your first web search. This is required to store the discovered websites into the sanitized JSON file.
-2. **Configure Web Search:**
-* Select **Búsqueda webs** from the top dropdown menu.
-* Type your keywords separated by commas (e.g., python, flet).
-* Name your output txt file (this serves as an external backup copy alongside the JSON file).
-* Choose your target search region.
-* Select the mandatory destination category created earlier (e.g., test).
-* Choose between the two advanced modes:
-* **WSOS Mode:** Automatically expands your keywords with technical modifiers (github, documentation, tutorial, etc.) to harvest high-value code and guides, validating content on the fly and generating a clean dataset (dataset_wsos_archivo.txt).
-* **Dirty Search:** Ideal when you need a massive flood of links and references without strict filters.
-
-
-
-
-3. **Run and Process:** Click the red **Execute Process** button and watch the console. Once finished, URLs will be automatically cleaned and saved under your category.
-
-
-4. **Extract Content:** To complete the information cycle, select your category from the main dropdown menu and hit run again. The system will crawl the saved websites and generate txt files containing all extracted content structured in batches.
+```
+1. Crear categoría(s)          →  Categorías → Añadir
+2. Buscar enlaces              →  Búsqueda webs + región + categoría destino
+3. (Opcional) Revisar webs.json
+4. Extraer contenido           →  Seleccionar categoría → Ejecutar
+5. Usar los *_part_N.txt       →  RAG, análisis, documentación, etc.
+```
 
 ---
 
-### 1-Click Setup
+## Estructura de archivos generados
 
-To save you installation headaches, an auto-configurator script is included:
-
-1. Clone or download this repository to your computer.
-2. Open your terminal in the project folder and run:
-python3 actualizador.py
-This script will check for required dependencies (flet, requests, beautifulsoup4, ddgs) and create a default webs.json template if missing.
-
-
-
----
-
-### How to Launch the Application?
-
-Once the setup is complete, launch the graphical interface by running:
-python3 main.py
+| Archivo | Origen | Contenido |
+|---------|--------|-----------|
+| `enlaces_encontrados.txt` (o el nombre indicado) | Búsqueda webs | Lista de URLs |
+| `webs.json` | Persistente | Categorías y URLs |
+| `dataset_wsos_*.txt` | Modo WSOS | Contenido limpio validado |
+| `dataset_dirty_*.txt` | Búsqueda Sucia | Contenido limpio (búsqueda sin filtro de trackers) |
+| `categoria_part_N.txt` | Extracción de categoría | Texto estructurado por fuente |
+| `instalacion_log.txt` | `actualizador.py` | Log de instalación |
 
 ---
 
-### Project Structure
+## Configuración (`webs.json`)
 
-* actualizador.py: Environment, dependency, and JSON auto-configurator.
+```json
+{
+    "cpu": [
+        "https://es.wikipedia.org/wiki/Unidad_central_de_proceso",
+        "https://es.wikipedia.org/wiki/Microprocesador"
+    ],
+    "programacion": [
+        "https://es.wikipedia.org/wiki/Python",
+        "https://docs.python.org/3/"
+    ]
+}
+```
 
-
-* main.py: Lightweight entry point initializing the Flet window.
-
-
-* ui.py: Graphical user interface (v1.1), thread management, and real-time logs.
-
-
-* scraping.py: Main orchestrator for business logic and tasks.
-
-
-* webs.json: Local JSON database, optimized with automatic cleaning in v1.1.
-
-
-* **core/ Modules**:
-
-
-* buscadores.py / buscawebs.py: Communication gateway with search engines.
-
-
-* bloqueos.py: Advanced anti-blocking and tracker sanitization filters.
-
-
-* procesador.py: Smart HTML processor isolating noise while protecting code formatting.
-
-
-* categorias.py: Logic for batch-processing and purging categories.
-
-
-
-
+- Claves = nombres de categoría (minúsculas internamente).
+- Valores = listas de URLs.
+- Editable a mano o desde la UI (crear / borrar categorías).
 
 ---
 
-### DISCLAIMER!
+## Ajuste de rendimiento
 
-The author is not responsible for any misuse of this tool. This software has been designed strictly for educational purposes, research, and personal development workflow automation. It is the user's sole responsibility to comply with the terms of service of consulted websites and applicable laws.
+Si DuckDuckGo limita peticiones o la red es inestable, reduce los workers en el código:
 
-I hope this proves useful in your daily workflow! Feel free to adapt it to your needs.
+```python
+# scraping.py
+MAX_SEARCH_WORKERS = 8   # bajar a 4 si hay rate-limit
+MAX_SCRAPE_WORKERS = 6   # bajar a 3–4 en redes lentas
+
+# core/categorias.py
+MAX_CATEGORY_WORKERS = 6
+```
+
+Si la red es estable y quieres más velocidad, puedes subir a 10–12 con precaución.
+
+---
+
+## Solución de problemas
+
+| Problema | Posible causa / solución |
+|----------|---------------------------|
+| `No se encuentra webs.json` | Ejecutar `python3 actualizador.py` o crear el archivo manualmente. |
+| Error al importar `ddgs` / `flet` | Reejecutar el actualizador o `pip install flet requests beautifulsoup4 ddgs`. |
+| Pocos resultados | Probar otra región, activar WSOS o Búsqueda Sucia, ampliar keywords. |
+| Errores frecuentes en DDGS | Bajar `MAX_SEARCH_WORKERS` (posible rate-limit). |
+| Contenido vacío en extracción | La página puede bloquear el User-Agent; revisar logs en consola. |
+| UI no cierra limpia | Usar **Detener Proceso** antes de cerrar si hay una tarea en curso. |
+
+---
+
+## Aviso legal
+
+El autor **no se hace responsable** del mal uso de esta herramienta.  
+WSOS Scripting está diseñado **estrictamente con fines educativos, de investigación y de automatización de flujos de desarrollo personales**.
+
+Es responsabilidad del usuario:
+
+- Cumplir los términos de servicio de los sitios web consultados.
+- Respetar las leyes aplicables (incluyendo derechos de autor y privacidad).
+- No sobrecargar servidores ajenos con peticiones abusivas.
+
+---
+
+## English summary
+
+**WSOS Scripting 1.11** is a desktop tool (Flet GUI) that:
+
+- Searches technical links via DuckDuckGo with multi-region support and strict tracker/ad filtering.
+- Organizes URLs into persistent categories (`webs.json`).
+- Extracts clean text from pages while preserving code blocks.
+- Offers **WSOS** mode (semantic keyword expansion + content validation) and **Dirty Search** (maximum volume).
+- **v1.11** introduces **nested parallel search**: up to 8 concurrent DuckDuckGo queries and up to 6 concurrent page downloads for datasets and categories.
+
+```bash
+python3 actualizador.py   # install deps + create webs.json template
+python3 main.py           # launch the app
+```
+
+See the Spanish sections above for full usage, architecture and legal notice.
+
+---
+
+**¿Te resulta útil?** Adáptalo a tus necesidades, ajusta los workers o integra nuevos motores.  
+Construido con ❤️ para automatizar el trabajo tedioso de recopilar y limpiar información técnica.

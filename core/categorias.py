@@ -3,10 +3,15 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .procesador import WebProcessor
 
+# Workers concurrentes para descarga de páginas por categoría
+MAX_CATEGORY_WORKERS = 6
+
 
 def run_category_scraping(selected_category: str, urls_to_scrape: list, stop_event=None):
   """Ejecuta el scraping y fraccionamiento para cualquier categoría de forma unificada.
-  Usa hilos concurrentes para acelerar las descargas de páginas.
+
+  Las descargas HTTP se lanzan en paralelo (anidadas); la escritura a disco
+  se hace al final en orden para mantener el particionado por líneas.
   """
   processor = WebProcessor()
   cat_lower = selected_category.lower()
@@ -24,11 +29,48 @@ def run_category_scraping(selected_category: str, urls_to_scrape: list, stop_eve
     base_filename = cat_lower.replace(" ", "_")
 
   print(
-      f"[🚀] Extracción para '{selected_category.upper()}'"
-      f" ({len(urls_to_scrape)} fuentes) [modo paralelo]..."
+      f"[🚀] Extracción PARALELA para '{selected_category.upper()}'"
+      f" ({len(urls_to_scrape)} fuentes)..."
   )
   start_time = time.time()
   total_chars = 0
+
+  if not urls_to_scrape:
+    print("[!] No hay URLs en esta categoría.")
+    return
+
+  # --- Fase 1: descarga anidada (concurrente) ---
+  def _scrape_one(url: str):
+    if stop_event and stop_event.is_set():
+      return url, ""
+    return url, processor.scrape_url(url)
+
+  workers = min(MAX_CATEGORY_WORKERS, max(1, len(urls_to_scrape)))
+  print(f"[⚡] {workers} workers concurrentes descargando páginas...")
+
+  # Conservar orden original de URLs para escritura predecible
+  ordered_results = [None] * len(urls_to_scrape)
+  url_to_index = {url: i for i, url in enumerate(urls_to_scrape)}
+
+  with ThreadPoolExecutor(max_workers=workers) as executor:
+    futures = {
+        executor.submit(_scrape_one, url): url for url in urls_to_scrape
+    }
+    for future in as_completed(futures):
+      if stop_event and stop_event.is_set():
+        for f in futures:
+          f.cancel()
+        print("[!] Proceso detenido por el usuario.")
+        break
+      url = futures[future]
+      try:
+        u, content = future.result()
+        ordered_results[url_to_index[url]] = (u, content)
+      except Exception as exc:
+        print(f"      [!] Error al raspar {url}: {exc}")
+        ordered_results[url_to_index[url]] = (url, "")
+
+  # --- Fase 2: escritura secuencial con particionado por líneas ---
   part_num = 1
   max_lines_per_file = 500
   current_output_filename = f"{base_filename}_part_{part_num}.txt"
@@ -39,48 +81,30 @@ def run_category_scraping(selected_category: str, urls_to_scrape: list, stop_eve
   )
   current_lines_in_file = 2
 
-  max_workers = min(8, max(2, len(urls_to_scrape)))
+  for item in ordered_results:
+    if item is None:
+      continue
+    url, content = item
+    if not content:
+      continue
 
-  def _scrape_one(url):
-    if stop_event and stop_event.is_set():
-      return url, ""
-    return url, processor.scrape_url(url)
+    source_block = f"\n\n--- FUENTE: {url} ---\n\n{content}"
+    block_lines = source_block.splitlines()
 
-  with ThreadPoolExecutor(max_workers=max_workers) as executor:
-    futures = {executor.submit(_scrape_one, url): url for url in urls_to_scrape}
+    if current_lines_in_file + len(block_lines) > max_lines_per_file:
+      f_out.close()
+      part_num += 1
+      current_output_filename = f"{base_filename}_part_{part_num}.txt"
+      f_out = open(current_output_filename, "w", encoding="utf-8")
+      f_out.write(
+          f"=== DATASET: {selected_category.upper()} (Parte {part_num}) ===\n\n"
+      )
+      current_lines_in_file = 2
 
-    for future in as_completed(futures):
-      if stop_event and stop_event.is_set():
-        print("[!] Proceso detenido por el usuario.")
-        # Cancel remaining futures best-effort
-        for f in futures:
-          f.cancel()
-        break
-
-      try:
-        url, content = future.result()
-      except Exception as e:
-        print(f"      [!] Error en hilo: {e}")
-        continue
-
-      if content:
-        source_block = f"\n\n--- FUENTE: {url} ---\n\n{content}"
-        block_lines = source_block.splitlines()
-
-        if current_lines_in_file + len(block_lines) > max_lines_per_file:
-          f_out.close()
-          part_num += 1
-          current_output_filename = f"{base_filename}_part_{part_num}.txt"
-          f_out = open(current_output_filename, "w", encoding="utf-8")
-          f_out.write(
-              f"=== DATASET: {selected_category.upper()} (Parte {part_num}) ===\n\n"
-          )
-          current_lines_in_file = 2
-
-        f_out.write(source_block)
-        current_lines_in_file += len(block_lines)
-        total_chars += len(content)
-        print(f"      [+] Extraído con éxito de: {url}")
+    f_out.write(source_block)
+    current_lines_in_file += len(block_lines)
+    total_chars += len(content)
+    print(f"      [+] Extraído con éxito de: {url}")
 
   f_out.close()
   print(

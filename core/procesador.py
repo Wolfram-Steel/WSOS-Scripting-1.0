@@ -22,9 +22,6 @@ class WebProcessor:
             " like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
     }
-    # Session reutilizable: connection pooling → menos latencia por petición
-    self.session = requests.Session()
-    self.session.headers.update(self.headers)
 
     # Patrones de ruido precompilados globalmente.
     # Al usar re.compile aquí, evitamos recompilar las expresiones regulares
@@ -132,7 +129,7 @@ class WebProcessor:
     """
     try:
       print(f"  [*] Analizando fuente: {url}")
-      response = self.session.get(url, timeout=6)
+      response = requests.get(url, headers=self.headers, timeout=10)
 
       if response.status_code != 200:
         print(f"      [!] Error de acceso (Status: {response.status_code})")
