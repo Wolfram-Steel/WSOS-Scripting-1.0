@@ -9,57 +9,33 @@ y este proyecto sigue [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [1.12.0] — 2026-10-07
 
-### Added
+### Robustez y control
+### Motor y trazabilidad
 
-#### Motor y trazabilidad
 - Perfiles de recopilación: **Rápido**, **Equilibrado**, **Seguro** y **Dataset IA**.
-- Objetivo del dataset configurable: Investigación, Educación, Programación, Documentación técnica, Dataset IA, Archivo web o Personalizado.
-- Metadatos de identidad del proyecto: autor, proyecto/Project ID, organización, idioma, descripción y **licencia**.
+- Objetivo del dataset configurable y metadatos personales/proyecto: autor, proyecto, organización, idioma y descripción.
 - `Dataset ID` y `Run ID` únicos por ejecución.
 - Quality Score 0–100 por documento.
 - SHA-256 del contenido y deduplicación por hash.
-- Normalización de URLs antes del scraping (elimina `utm_*`, `gclid`, etc.).
+- Normalización de URLs antes del scraping.
 - Manifiesto `.wsos.json` con identidad, estadísticas y documentos aceptados.
-- **WSOS Engine Report** en consola: calidad media, velocidad y tiempo.
-- Estadísticas finales visibles (válidos, descartados, duplicados, caracteres).
-- Módulo `core/dataset.py` (perfiles, scoring, metadatos y manifiestos).
-- Módulo `core/red.py` (Session pooling, rate limiting por dominio, backoff).
+- Estadísticas finales visibles en la interfaz.
+- `lxml` como parser preferente con fallback seguro.
+- Dependencia `lxml` añadida al auto-configurador.
 
-#### Extracción y limpieza
-- Filtrado temprano de extensiones binarias (imágenes, archivos, ejecutables, etc.).
-- Soporte PDF opcional mediante `pypdf`.
-- Limpieza ampliada de boilerplate (cookies, anuncios, popups y sidebars).
-- `lxml` como parser preferente con fallback a `html.parser`.
-- Dependencias `lxml` y `pypdf` añadidas al auto-configurador.
 
-### Changed
-
-#### Robustez y control
-- Parada cooperativa reforzada con checkpoints en búsqueda, descarga y escritura.
+- Parada cooperativa reforzada con checkpoints en búsqueda y scraping.
 - Los futures pendientes se cancelan y los ejecutores se cierran sin bloquear la interfaz.
 - Timeouts HTTP explícitos para evitar esperas indefinidas.
-- Rate limiting **independiente por dominio** (sustituye el limitador global compartido).
-- `requests.Session()` **persistente por worker** con connection pooling / keep-alive.
+- Rate limiting compartido entre workers.
 - Reintentos con exponential backoff y jitter para errores transitorios.
 - Barra de progreso determinada conectada al número real de tareas completadas.
 - El procesamiento web comparte la señal de parada con las peticiones HTTP.
-- Banner y título de ventana: **WSOS SCRIPTING 1.12**.
 
 ### Compatibilidad
 
 - Se mantiene `ThreadPoolExecutor`; no se introduce `asyncio` en esta versión.
 - Se mantiene la estructura general de WSOS Scripting 1.11.
-
-### Migration notes
-
-| Desde 1.11 | Acción |
-|------------|--------|
-| Actualizar | Sustituir todos los módulos; nuevos: `core/dataset.py`, `core/red.py`. |
-| Dependencias | Ejecutar `python3 actualizador.py` (añade `lxml` y `pypdf`). |
-| webs.json | No requiere cambios. |
-| UI | Nuevos campos de perfil, objetivo e identidad del dataset. |
-
----
 
 ## [1.11.0] — 2026-10-07
 
@@ -185,7 +161,16 @@ webs.json        → persistencia
 
 ---
 
-[1.12.0]: https://github.com/<usuario>/<repo>/compare/v1.11.0...v1.12.0  
 [1.11.0]: https://github.com/<usuario>/<repo>/compare/v1.1.0...v1.11.0  
 [1.1.0]: https://github.com/<usuario>/<repo>/compare/v1.0.0...v1.1.0  
 [1.0.0]: https://github.com/<usuario>/<repo>/releases/tag/v1.0.0
+
+
+### Refinamiento 1.12
+- `requests.Session()` persistente por worker con pooling/keep-alive.
+- Rate limiting independiente por dominio.
+- Filtrado temprano de extensiones binarias.
+- Soporte PDF opcional mediante `pypdf`.
+- Limpieza ampliada de boilerplate (cookies, anuncios, popups y sidebars).
+- Campo de licencia en los metadatos del dataset.
+- WSOS Engine Report con calidad media, velocidad y tiempo.

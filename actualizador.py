@@ -35,26 +35,28 @@ def guardar_log_en_archivo():
 
 def check_and_install_dependencies():
   """Verifica e instala de forma automática las librerías requeridas."""
-  required_packages = ["flet", "requests", "beautifulsoup4",
-        "lxml", "pypdf", "ddgs"]
+  required_packages = [
+      ("flet", "flet"),
+      ("requests", "requests"),
+      ("beautifulsoup4", "bs4"),
+      ("lxml", "lxml"),
+      ("pypdf", "pypdf"),
+      ("ddgs", "ddgs"),
+  ]
 
   log_msg("[*] Verificando dependencias de Python para WSOS Scripting...")
 
-  for package in required_packages:
+  for package, import_name in required_packages:
     try:
-      __import__(package)
+      __import__(import_name)
       log_msg(f"  [✔] Paquete '{package}' -> Ya instalado en el entorno.")
     except ImportError:
       log_msg(f"  [!] Paquete '{package}' -> No encontrado. Instalando vía pip...")
       try:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", package]
-        )
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
         log_msg(f"  [+] Paquete '{package}' -> Instalado correctamente.")
       except Exception as e:
-        log_msg(
-            f"  [✘] ERROR CRÍTICO al instalar '{package}': {e}. Instálalo manualmente."
-        )
+        log_msg(f"  [✘] ERROR CRÍTICO al instalar '{package}': {e}. Instálalo manualmente.")
 
 
 def check_config_file():

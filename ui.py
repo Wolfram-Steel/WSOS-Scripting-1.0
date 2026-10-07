@@ -35,8 +35,12 @@ class ScraperUI:
     self.page.padding = 20
     self.page.spacing = 15
     self.page.theme_mode = ft.ThemeMode.DARK
-    self.page.window_width = 900
-    self.page.window_height = 860
+    try:
+      self.page.window.width = 900
+      self.page.window.height = 860
+    except AttributeError:
+      self.page.window_width = 900
+      self.page.window_height = 860
 
   def build_layout(self):
     banner_text = ft.Text(
@@ -106,40 +110,20 @@ class ScraperUI:
         options=[ft.dropdown.Option(name) for name in OBJECTIVES],
         visible=is_init_zero, border_color=ft.Colors.BLUE_400,
     )
-    self.txt_project = ft.TextField(
-        label="Proyecto / Project ID", hint_text="ej. INF-NUMS-MATH",
-        visible=is_init_zero, width=185, border_color=ft.Colors.CYAN_400,
-    )
-    self.txt_author = ft.TextField(
-        label="Autor", hint_text="Tu nombre",
-        visible=is_init_zero, width=185, border_color=ft.Colors.GREEN_400,
-    )
-    self.txt_organization = ft.TextField(
-        label="Organización", hint_text="Opcional",
-        visible=is_init_zero, width=185, border_color=ft.Colors.AMBER_400,
-    )
-    self.txt_license = ft.TextField(
-        label="Licencia", hint_text="ej. CC BY 4.0",
-        visible=is_init_zero, width=185, border_color=ft.Colors.PURPLE_400,
-    )
+    self.txt_project = ft.TextField(label="Proyecto / Project ID", hint_text="ej. INF-NUMS-MATH", visible=is_init_zero, width=235, border_color=ft.Colors.PURPLE_400)
+    self.txt_author = ft.TextField(label="Autor", hint_text="Tu nombre", visible=is_init_zero, width=235, border_color=ft.Colors.GREEN_400)
+    self.txt_organization = ft.TextField(label="Organización", hint_text="Opcional", visible=is_init_zero, width=235, border_color=ft.Colors.BLUE_400)
+    self.txt_license = ft.TextField(label="Licencia", hint_text="ej. CC BY 4.0", visible=is_init_zero, width=235, border_color=ft.Colors.ORANGE_400)
+    self.language_map = {
+        "Español": "es", "English": "en", "Français": "fr",
+        "Deutsch": "de", "Italiano": "it", "Português": "pt",
+    }
     self.txt_language = ft.Dropdown(
-        label="Idioma", value="es", width=150, visible=is_init_zero,
-        options=[
-            ft.dropdown.Option("es", "Español"),
-            ft.dropdown.Option("en", "English"),
-            ft.dropdown.Option("fr", "Français"),
-            ft.dropdown.Option("de", "Deutsch"),
-            ft.dropdown.Option("it", "Italiano"),
-            ft.dropdown.Option("pt", "Português"),
-        ],
-        border_color=ft.Colors.TEAL_400,
+        label="Idioma", value="Español", visible=is_init_zero, width=235,
+        options=[ft.dropdown.Option(name) for name in self.language_map],
+        border_color=ft.Colors.CYAN_400,
     )
-    self.txt_description = ft.TextField(
-        label="Descripción del dataset",
-        hint_text="Describe para qué se recopila este material",
-        visible=is_init_zero, multiline=True, min_lines=1, max_lines=3, width=760,
-        border_color=ft.Colors.BLUE_GREY_400,
-    )
+    self.txt_description = ft.TextField(label="Descripción del dataset", hint_text="Describe para qué se recopila este material", visible=is_init_zero, multiline=True, min_lines=1, max_lines=3, expand=True)
 
     self.target_category_dropdown = ft.Dropdown(
         label="Categoría de destino (Obligatoria para guardar)",
@@ -259,18 +243,18 @@ class ScraperUI:
         expand=True,
     )
 
-    # El formulario mantiene un ancho fijo para que maximizar la ventana no
-    # desplace los controles de categoría y metadatos. La consola es la zona
-    # que absorbe el espacio adicional.
     form_column = ft.Column(
         controls=[
+            banner_text,
+            ft.Divider(),
             top_row_operations,
             self.txt_keywords,
             self.txt_output_file,
             self.region_dropdown,
             ft.Row(controls=[self.profile_dropdown, self.objective_dropdown], spacing=10),
-            ft.Row(controls=[self.txt_project, self.txt_author, self.txt_organization, self.txt_license], spacing=8),
-            ft.Row(controls=[self.txt_language], spacing=8),
+            ft.Row(controls=[self.txt_project, self.txt_author], spacing=10),
+            ft.Row(controls=[self.txt_organization, self.txt_license], spacing=10),
+            self.txt_language,
             self.txt_description,
             self.target_category_dropdown,
             self.advanced_modes_row,
@@ -278,20 +262,13 @@ class ScraperUI:
             self.stats_text,
             action_buttons,
         ],
+        spacing=12,
         width=760,
-        spacing=10,
+        scroll=ft.ScrollMode.AUTO,
     )
 
-    form_area = ft.Row(
-        controls=[form_column],
-        alignment=ft.MainAxisAlignment.START,
-    )
-
-    main_column = ft.Column(
+    console_column = ft.Column(
         controls=[
-            banner_text,
-            ft.Divider(),
-            form_area,
             ft.Text("Consola de Ejecución:", weight=ft.FontWeight.BOLD),
             console_container,
         ],
@@ -299,7 +276,16 @@ class ScraperUI:
         spacing=12,
     )
 
-    self.page.add(main_column)
+    main_row = ft.Row(
+        controls=[
+            ft.Container(content=form_column, width=760),
+            console_column,
+        ],
+        expand=True,
+        spacing=18,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+    )
+    self.page.add(main_row)
 
   def open_category_dialog(self, e):
     categories_list_column = ft.Column(
@@ -492,6 +478,8 @@ class ScraperUI:
       self.log_view.controls.append(
           ft.Text(message, font_family="Consolas", size=12)
       )
+      if len(self.log_view.controls) > 1000:
+        del self.log_view.controls[:-1000]
       self.log_view.update()
 
     try:
@@ -531,7 +519,7 @@ class ScraperUI:
       pass
 
   def open_output_folder(self, e):
-    current_path = os.getcwd()
+    current_path = str(self.scraper.base_dir)
     try:
       if os.name == "nt":
         os.startfile(current_path)
@@ -624,7 +612,7 @@ class ScraperUI:
           project=self.txt_project.value or "",
           organization=self.txt_organization.value or "",
           description=self.txt_description.value or "",
-          language=self.txt_language.value or "es",
+          language=self.language_map.get(self.txt_language.value, "es"),
           objective=self.objective_dropdown.value or "Investigación",
           stats_callback=self.update_stats,
           allow_pdf=bool(self.pdf_checkbox.value),
@@ -637,14 +625,20 @@ class ScraperUI:
       def __init__(self, callback):
         self.callback = callback
         self.buffer = ""
+        self._lock = threading.Lock()
 
       def write(self, text):
-        if text:
+        if not text:
+          return 0
+        with self._lock:
           self.buffer += text
+          lines = []
           while "\n" in self.buffer:
             line, self.buffer = self.buffer.split("\n", 1)
             if line.strip():
-              self.callback(line)
+              lines.append(line)
+        for line in lines:
+          self.callback(line)
         return len(text)
 
       def flush(self):

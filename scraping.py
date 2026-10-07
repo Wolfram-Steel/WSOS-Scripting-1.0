@@ -9,7 +9,7 @@ import requests
 
 from core import bloqueos, buscadores, categorias
 from core.red import RateLimiter, DomainRateLimiter
-from core.dataset import PROFILES, OBJECTIVES, build_metadata, normalize_url, write_manifest
+from core.dataset import PROFILES, OBJECTIVES, build_metadata, normalize_url, write_manifest, atomic_json_dump
 
 # Workers concurrentes para búsqueda anidada (keywords en paralelo)
 MAX_SEARCH_WORKERS = 8
@@ -25,7 +25,10 @@ if os.name == "nt":
 class IntegratedCodeScraper:
 
   def __init__(self, config_file: str = "webs.json"):
+    self.base_dir = Path(__file__).resolve().parent
     self.config_file = Path(config_file)
+    if not self.config_file.is_absolute():
+      self.config_file = self.base_dir / self.config_file
     self.url_filter = bloqueos.URLFilter()
     self.search_engine = buscadores.MultiSearchEngine()
 
@@ -37,20 +40,45 @@ class IntegratedCodeScraper:
     if not self.config_file.exists():
       print(f"[!] No se encuentra el archivo '{self.config_file}'. Créalo primero.")
       return {}
-    with open(self.config_file, "r", encoding="utf-8") as f:
-      return json.load(f)
+    try:
+      with open(self.config_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+      if not isinstance(data, dict):
+        raise ValueError("webs.json debe contener un objeto JSON")
+      return data
+    except (json.JSONDecodeError, OSError, ValueError) as exc:
+      backup = self.config_file.with_suffix(".json.bak")
+      print(f"[!] webs.json no se pudo leer: {exc}")
+      if backup.exists():
+        try:
+          with open(backup, "r", encoding="utf-8") as f:
+            data = json.load(f)
+          print(f"[↺] Recuperando configuración desde {backup}")
+          return data
+        except Exception:
+          pass
+      return {}
+
+  def _resolve_category_key(self, data: dict, category_name: str) -> str:
+    wanted = category_name.strip()
+    for key in data:
+      if key.casefold() == wanted.casefold():
+        return key
+    return wanted
+
+  def _save_config(self, data: dict) -> None:
+    atomic_json_dump(self.config_file, data)
 
   def create_category(self, category_name: str) -> bool:
     """Crea una nueva categoría vacía en el archivo webs.json si no existe."""
     data = self.load_config()
-    cat_key = category_name.strip().lower()
+    cat_key = self._resolve_category_key(data, category_name)
     if not cat_key:
       return False
     
     if cat_key not in data:
       data[cat_key] = []
-      with open(self.config_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+      self._save_config(data)
       print(f"[+] Categoría '{cat_key}' creada con éxito en '{self.config_file}'.")
       return True
     return False
@@ -58,12 +86,11 @@ class IntegratedCodeScraper:
   def delete_category(self, category_name: str) -> bool:
     """Elimina una categoría existente del archivo webs.json."""
     data = self.load_config()
-    cat_key = category_name.strip().lower()
+    cat_key = self._resolve_category_key(data, category_name)
     
     if cat_key in data:
       del data[cat_key]
-      with open(self.config_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+      self._save_config(data)
       print(f"[-] Categoría '{cat_key}' eliminada de '{self.config_file}'.")
       return True
     return False
@@ -74,81 +101,68 @@ class IntegratedCodeScraper:
       return
       
     data = self.load_config()
-    cat_key = category_name.strip().lower()
+    cat_key = self._resolve_category_key(data, category_name)
     
     if cat_key not in data:
       data[cat_key] = []
 
     added = 0
+    existing = {normalize_url(u) for u in data[cat_key]}
     for url in urls:
-      if url not in data[cat_key]:
-        data[cat_key].append(url)
+      clean = normalize_url(url)
+      if clean and clean not in existing:
+        data[cat_key].append(clean)
+        existing.add(clean)
         added += 1
 
     if added > 0:
-      with open(self.config_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+      self._save_config(data)
       print(f"[+] Se han guardado {added} URLs nuevas directamente en la categoría '{cat_key}' del JSON.")
 
   def optimize_webs_json(self, stop_event=None):
-    """Verifica todas las URLs del JSON, hace un respaldo y elimina las rotas (404, etc.)."""
+    """Comprueba URLs sin eliminar recursos ante errores transitorios.
+
+    Solo 404/410 se consideran una señal suficiente para retirar una URL.
+    """
     if not self.config_file.exists():
       print(f"[!] No se encuentra el archivo '{self.config_file}'.")
       return
-
     bak_file = self.config_file.with_suffix(".json.bak")
-    shutil.copy(self.config_file, bak_file)
+    shutil.copy2(self.config_file, bak_file)
     print(f"[*] Copia de seguridad creada en: {bak_file}")
-
     data = self.load_config()
     optimized_data = {}
-    total_checked = 0
-    total_removed = 0
-
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        )
-    }
-
+    total_checked = total_removed = 0
+    session = requests.Session()
+    session.headers.update({"User-Agent": "WSOS-Scripting/1.12"})
     for category, urls in data.items():
-      if stop_event and stop_event.is_set():
-        print("[!] Optimización detenida por el usuario.")
-        break
-
-      print(f"\n[🔍] Verificando categoría: {category.upper()}")
       valid_urls = []
       for url in urls:
         if stop_event and stop_event.is_set():
-          break
+          optimized_data[category] = valid_urls + [u for u in urls if u not in valid_urls]
+          self._save_config(optimized_data | {k: v for k, v in data.items() if k not in optimized_data})
+          print("[!] Optimización detenida por el usuario; no se eliminan URLs no comprobadas.")
+          return
         total_checked += 1
         try:
-          res = requests.head(
-              url, headers=headers, timeout=5, allow_redirects=True
-          )
-          if res.status_code == 405:  # Si HEAD no está permitido, probamos GET
-            res = requests.get(url, headers=headers, timeout=5, stream=True)
+          res = session.head(url, timeout=(5, 10), allow_redirects=True)
+          if res.status_code == 405:
             res.close()
-
-          if res.status_code < 400:
-            print(f"  [✔] OK ({res.status_code}): {url}")
-            valid_urls.append(url)
-          else:
-            print(f"  [✘] Rota/Error ({res.status_code}): {url}")
+            res = session.get(url, timeout=(5, 10), allow_redirects=True, stream=True)
+          status = res.status_code
+          res.close()
+          if status in (404, 410):
+            print(f"  [✘] Eliminada ({status}): {url}")
             total_removed += 1
-        except Exception as e:
-          print(f"  [✘] Error de conexión: {url}")
-          total_removed += 1
-
+          else:
+            valid_urls.append(url)
+            print(f"  [✔] Conservada ({status}): {url}")
+        except requests.RequestException as exc:
+          valid_urls.append(url)
+          print(f"  [↺] Error transitorio; conservada: {url} ({exc})")
       optimized_data[category] = valid_urls
-
-    with open(self.config_file, "w", encoding="utf-8") as f:
-      json.dump(optimized_data, f, indent=4, ensure_ascii=False)
-
-    print(
-        f"\n[+] Optimización finalizada. URLs revisadas: {total_checked} |"
-        f" Eliminadas: {total_removed}"
-    )
+    self._save_config(optimized_data)
+    print(f"\n[+] Optimización finalizada. URLs revisadas: {total_checked} | Eliminadas: {total_removed}")
 
   def search_custom_gui(
       self,
@@ -272,15 +286,16 @@ class IntegratedCodeScraper:
     finally:
       executor.shutdown(wait=False, cancel_futures=True)
 
+    if stop_event and stop_event.is_set():
+      print("[!] Ejecución detenida: no se escriben resultados parciales ni se modifica webs.json.")
+      return
+
     # Normalización + deduplicación temprana: evita trabajo de red redundante.
     profile_cfg = PROFILES.get(profile, PROFILES["Equilibrado"])
     print(f"[⚙] Perfil: {profile} | Objetivo: {objective} | Calidad mínima: {profile_cfg['quality_min']}")
     normalized = []
     seen = set()
-    source_urls = (
-        [u for u in all_found_urls if self.url_filter.is_supported_resource(u, allow_pdf=allow_pdf)]
-        if dirty_mode else self.url_filter.clean_and_validate(all_found_urls, allow_pdf=allow_pdf)
-    )
+    source_urls = self.url_filter.clean_and_validate(all_found_urls, allow_pdf=allow_pdf)
     for u in source_urls:
       if stop_event and stop_event.is_set():
         break
@@ -293,7 +308,10 @@ class IntegratedCodeScraper:
 
     # Guardar resultados en el archivo de salida base .txt
     try:
-      with open(output_filename, "w", encoding="utf-8") as f:
+      output_path = Path(output_filename)
+      if not output_path.is_absolute():
+        output_path = self.base_dir / output_path
+      with open(output_path, "w", encoding="utf-8") as f:
         for url in clean_urls:
           f.write(f"{url}\n")
       print(
@@ -305,19 +323,20 @@ class IntegratedCodeScraper:
 
     # Si se indicó una categoría de destino, guardar en el JSON estrictamente en la categoría elegida
     added_count = 0
-    if save_category and clean_urls:
-      cat_key = save_category.strip().lower()
+    if save_category and clean_urls and not (stop_event and stop_event.is_set()):
       data = self.load_config()
+      cat_key = self._resolve_category_key(data, save_category)
       if cat_key not in data:
         data[cat_key] = []
-      
+      existing = {normalize_url(u) for u in data[cat_key]}
       for url in clean_urls:
-        if url not in data[cat_key]:
-          data[cat_key].append(url)
+        normalized_url = normalize_url(url)
+        if normalized_url and normalized_url not in existing:
+          data[cat_key].append(normalized_url)
+          existing.add(normalized_url)
           added_count += 1
 
-      with open(self.config_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+      self._save_config(data)
       
       if dirty_mode:
         print(f"[+] [BÚSQUEDA SUCIA] ¡Volcado masivo completado! {added_count} URLs nuevas añadidas a la categoría '{cat_key}' ({len(clean_urls)} totales procesadas).")
@@ -328,13 +347,14 @@ class IntegratedCodeScraper:
     total_chars_dataset = 0
     if (wsos_mode or dirty_mode) and clean_urls:
       mode_label = "WSOS" if wsos_mode else "BÚSQUEDA SUCIA"
+      scrape_workers = min(profile_cfg["workers"], max(1, len(clean_urls)))
       print(
           f"[🚀 {mode_label}] Pipeline de Dataset en paralelo "
-          f"({min(MAX_SCRAPE_WORKERS, len(clean_urls))} workers)..."
+          f"({scrape_workers} workers | {profile_cfg['retries']} reintentos | {profile_cfg['max_chars']:,} chars máx.)..."
       )
       from core.procesador import WebProcessor
 
-      processor = WebProcessor(stop_event=stop_event, rate_limiter=DomainRateLimiter(profile_cfg["rate_limit"]))
+      processor = WebProcessor(stop_event=stop_event, rate_limiter=DomainRateLimiter(profile_cfg["rate_limit"]), retries=profile_cfg["retries"], max_chars=profile_cfg["max_chars"])
       dataset_filename = f"dataset_{'wsos' if wsos_mode else 'dirty'}_{output_filename}"
 
       def _scrape_one(url: str):
@@ -343,7 +363,6 @@ class IntegratedCodeScraper:
         return processor.scrape_url_details(url, stop_event=stop_event, allow_pdf=allow_pdf)
 
       results = []
-      scrape_workers = min(MAX_SCRAPE_WORKERS, max(1, len(clean_urls)))
       executor = ThreadPoolExecutor(max_workers=scrape_workers)
       futures = {executor.submit(_scrape_one, url): url for url in clean_urls}
       completed_scrapes = 0
@@ -367,12 +386,13 @@ class IntegratedCodeScraper:
       finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
+      interrupted = bool(stop_event and stop_event.is_set())
       documents = []
       accepted_hashes = set()
       duplicates = 0
       rejected_quality = 0
       accepted = 0
-      with open(dataset_filename, "w", encoding="utf-8") as ds_file:
+      with open(self.base_dir / dataset_filename, "w", encoding="utf-8") as ds_file:
         ds_file.write(
             f"=== DATASET AUTOMÁTICO {mode_label} - KEYWORDS: {raw_keywords} ===\n"
             f"=== PERFIL: {profile} | OBJETIVO: {objective} ===\n\n"
@@ -404,6 +424,7 @@ class IntegratedCodeScraper:
       total_bytes = sum(int(item.get("bytes", 0) or 0) for item in results)
       avg_quality = round(sum(d["quality"] for d in documents) / max(1, len(documents)), 1)
       stats = {
+          "status": "interrupted" if interrupted else "completed",
           "urls_found": len(all_found_urls), "urls_unique": len(clean_urls),
           "documents_accepted": accepted, "documents_rejected": rejected_quality,
           "duplicates": duplicates, "characters": total_chars_dataset,
@@ -412,7 +433,7 @@ class IntegratedCodeScraper:
           "urls_per_second": round(len(clean_urls) / elapsed, 2),
           "pdf_enabled": bool(allow_pdf),
       }
-      manifest_path = write_manifest(dataset_filename, metadata, stats, documents)
+      manifest_path = write_manifest(str(self.base_dir / dataset_filename), metadata, stats, documents)
       print(f"[+] Manifiesto WSOS generado: {manifest_path}")
       print(f"[🆔] Dataset ID: {metadata['dataset_id']} | Run ID: {metadata['run_id']}")
       print(f"[📊] Dataset: {accepted} válidos | {duplicates} duplicados | {rejected_quality} descartados | {total_chars_dataset} caracteres")
