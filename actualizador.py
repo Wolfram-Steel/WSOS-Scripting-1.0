@@ -35,7 +35,8 @@ def guardar_log_en_archivo():
 
 def check_and_install_dependencies():
   """Verifica e instala de forma automática las librerías requeridas."""
-  required_packages = ["flet", "requests", "beautifulsoup4", "ddgs"]
+  required_packages = ["flet", "requests", "beautifulsoup4",
+        "lxml", "pypdf", "ddgs"]
 
   log_msg("[*] Verificando dependencias de Python para WSOS Scripting...")
 
@@ -101,3 +102,87 @@ if __name__ == "__main__":
 
   guardar_log_en_archivo()
   input("\nPresiona Enter para cerrar esta ventana...")
+
+def preparar_actualizacion_windows(archivos, destino=None):
+  """Prepara una actualización para Windows sin sobrescribir archivos en uso.
+
+  `archivos` debe ser un directorio temporal que contenga la versión nueva.
+  Devuelve la ruta del .bat generado. El .bat espera al cierre del proceso
+  actual, crea un backup y reemplaza los archivos de forma atómica por grupos.
+  """
+  if os.name != "nt":
+    raise RuntimeError("Esta rutina está destinada a Windows.")
+
+  source = Path(archivos).resolve()
+  target = Path(destino or Path.cwd()).resolve()
+  if not source.exists() or not source.is_dir():
+    raise FileNotFoundError(f"Carpeta de actualización no válida: {source}")
+
+  temp_root = target / ".wsos_update"
+  temp_root.mkdir(parents=True, exist_ok=True)
+  staged = temp_root / "payload"
+  backup = temp_root / "backup"
+  staged.mkdir(parents=True, exist_ok=True)
+  backup.mkdir(parents=True, exist_ok=True)
+
+  # Copia el payload al área privada de actualización.
+  if staged.exists():
+    for item in staged.iterdir():
+      if item.is_dir():
+        import shutil
+        shutil.rmtree(item)
+      else:
+        item.unlink(missing_ok=True)
+  import shutil
+  shutil.copytree(source, staged, dirs_exist_ok=True)
+
+  script = temp_root / "aplicar_actualizacion.bat"
+  pid = os.getpid()
+  python_exe = str(Path(sys.executable).resolve())
+  script_text = f'''@echo off
+setlocal EnableExtensions
+set "TARGET={target}"
+set "STAGED={staged}"
+set "BACKUP={backup}"
+set "PID={pid}"
+set "PYTHON={python_exe}"
+
+:WAIT
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try {{ $p=Get-Process -Id %PID% -ErrorAction Stop; exit 1 }} catch {{ exit 0 }}" >nul 2>&1
+if not errorlevel 1 (
+  timeout /t 1 /nobreak >nul
+  goto WAIT
+)
+
+if exist "%BACKUP%" rmdir /s /q "%BACKUP%"
+mkdir "%BACKUP%"
+
+robocopy "%TARGET%" "%BACKUP%" /E /XD ".wsos_update" >nul
+robocopy "%STAGED%" "%TARGET%" /E /COPY:DAT /R:3 /W:1 >nul
+if errorlevel 8 goto FAIL
+
+rmdir /s /q "%STAGED%" >nul 2>&1
+start "" py "%TARGET%\\main.py"
+rmdir /s /q "%~dp0" >nul 2>&1
+exit /b 0
+
+:FAIL
+echo [WSOS] Error aplicando la actualizacion. El backup permanece en "%BACKUP%".
+pause
+exit /b 1
+'''
+  script.write_text(script_text, encoding="utf-8")
+  return script
+
+
+def lanzar_actualizacion_windows(script_path):
+  """Lanza el .bat separado y termina el proceso actual."""
+  if os.name != "nt":
+    raise RuntimeError("Esta rutina está destinada a Windows.")
+  script = Path(script_path).resolve()
+  subprocess.Popen(
+      ["cmd.exe", "/c", str(script)],
+      creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+      close_fds=True,
+  )
+  return True

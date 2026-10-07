@@ -1,11 +1,11 @@
-# WSOS Scripting 1.11
+# WSOS Scripting 1.12
 
 **Herramienta de escritorio para búsqueda inteligente de enlaces técnicos y extracción limpia de contenido web.**
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![Flet](https://img.shields.io/badge/UI-Flet-purple)](https://flet.dev/)
 [![License](https://img.shields.io/badge/License-Educational-orange)](#aviso-legal)
-[![Version](https://img.shields.io/badge/Version-1.11-red)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-1.12-red)](CHANGELOG.md)
 [![Concurrency](https://img.shields.io/badge/Search-Nested%20Parallel-brightgreen)](CHANGELOG.md)
 
 > **Autor:** Wolfram Steel  
@@ -48,6 +48,33 @@
 Todo desde una interfaz gráfica moderna en modo oscuro, con consola de logs en tiempo real, control de parada segura y **búsqueda anidada en paralelo** para maximizar la velocidad.
 
 ---
+
+## Novedades de la versión 1.12
+
+La versión 1.12 mantiene la arquitectura paralela de 1.11 y añade robustez, rendimiento y trazabilidad: parada cooperativa, timeouts, reintentos con exponential backoff, rate limiting por perfil, sesiones HTTP reutilizables, normalización/deduplicación de URLs, Quality Score, hashes SHA-256, perfiles de recopilación y manifiestos `.wsos.json`. En Windows se prepara además la actualización mediante un proceso auxiliar para no sobrescribir archivos en uso.
+
+### Control y red
+
+- Parada cooperativa mediante `stop_event` en búsqueda, descarga y escritura.
+- Los `Future` pendientes se cancelan y los `ThreadPoolExecutor` se cierran sin bloquear la interfaz.
+- Peticiones HTTP con timeout, hasta 3 intentos y backoff con jitter.
+- Rate limiting compartido entre workers.
+- Barra de progreso determinada conectada a tareas completadas.
+
+## Mejoras adicionales de 1.12
+
+- **Perfiles de recopilación**: Rápido, Equilibrado, Seguro y Dataset IA.
+- **Objetivo del dataset**: Investigación, Educación, Programación, Documentación técnica, Dataset IA, Archivo web o Personalizado.
+- **Identidad del proyecto**: autor, proyecto/Project ID, organización, idioma y descripción.
+- **Trazabilidad**: cada dataset recibe `Dataset ID`, `Run ID`, fecha y versión del motor.
+- **Quality Score**: cada documento obtiene una puntuación 0–100 antes de entrar al dataset.
+- **SHA-256**: cada documento aceptado queda identificado mediante hash de contenido.
+- **Deduplicación por contenido**: evita almacenar páginas diferentes con el mismo contenido.
+- **Manifiesto WSOS**: junto al `.txt` se genera un `.wsos.json` con metadatos, estadísticas y documentos.
+- **Estadísticas**: URLs encontradas/únicas, documentos válidos, descartados, duplicados y caracteres.
+- **Normalización de URLs**: eliminación de parámetros de tracking y duplicados antes del scraping.
+- **Parser optimizado**: uso de `lxml` cuando está disponible, con fallback a `html.parser`.
+- **Límite de HTML**: páginas excesivamente grandes se descartan para proteger rendimiento y memoria.
 
 ## Novedades de la versión 1.11
 
@@ -152,6 +179,7 @@ Usuario (UI)
   - `flet`
   - `requests`
   - `beautifulsoup4`
+  - `lxml`
   - `ddgs`
 
 ---
@@ -320,7 +348,7 @@ Es responsabilidad del usuario:
 
 ## English summary
 
-**WSOS Scripting 1.11** is a desktop tool (Flet GUI) that:
+**WSOS Scripting 1.12** is a desktop tool (Flet GUI) that:
 
 - Searches technical links via DuckDuckGo with multi-region support and strict tracker/ad filtering.
 - Organizes URLs into persistent categories (`webs.json`).
@@ -339,3 +367,13 @@ See the Spanish sections above for full usage, architecture and legal notice.
 
 **¿Te resulta útil?** Adáptalo a tus necesidades, ajusta los workers o integra nuevos motores.  
 Construido con ❤️ para automatizar el trabajo tedioso de recopilar y limpiar información técnica.
+
+
+### Refinamiento 1.12
+- `requests.Session()` persistente por worker con pooling/keep-alive.
+- Rate limiting independiente por dominio.
+- Filtrado temprano de extensiones binarias.
+- Soporte PDF opcional mediante `pypdf`.
+- Limpieza ampliada de boilerplate (cookies, anuncios, popups y sidebars).
+- Campo de licencia en los metadatos del dataset.
+- WSOS Engine Report con calidad media, velocidad y tiempo.

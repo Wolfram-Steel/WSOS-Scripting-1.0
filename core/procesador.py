@@ -1,11 +1,14 @@
 # procesador.py
 from datetime import datetime
+from .dataset import content_hash, quality_score
 import html
 import os
 from pathlib import Path
 import re
 from bs4 import BeautifulSoup
 import requests
+
+from .red import DomainRateLimiter, get_thread_session, request_with_retry
 
 
 class WebProcessor:
@@ -14,8 +17,11 @@ class WebProcessor:
   respetando bloques de código y filtrando ruido irrelevante.
   """
 
-  def __init__(self):
+  def __init__(self, stop_event=None, rate_limiter=None):
     # Cabeceras HTTP estándar para simular un navegador real y evitar bloqueos básicos
+    self.stop_event = stop_event
+    self.rate_limiter = rate_limiter or DomainRateLimiter(0.20)
+
     self.headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
@@ -121,49 +127,89 @@ class WebProcessor:
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
-  def scrape_url(self, url: str) -> str:
-    """Realiza la petición HTTP a la URL indicada, procesa el árbol HTML
+  def scrape_url(self, url: str, stop_event=None, allow_pdf=False) -> str:
+    """Compatibilidad: devuelve únicamente el texto limpio."""
+    return self.scrape_url_details(url, stop_event=stop_event, allow_pdf=allow_pdf).get("content", "")
 
-    para proteger bloques de código, elimina elementos estructurales innecesarios
-    (scripts, menús, footers) y devuelve el texto limpio resultante.
-    """
+  def scrape_url_details(self, url: str, stop_event=None, allow_pdf=False) -> dict:
+    """Descarga y procesa una URL devolviendo contenido + metadatos de calidad."""
+    active_stop = stop_event or self.stop_event
     try:
+      if active_stop and active_stop.is_set():
+        return {"url": url, "content": "", "quality": 0, "sha256": ""}
       print(f"  [*] Analizando fuente: {url}")
-      response = requests.get(url, headers=self.headers, timeout=10)
+      response = request_with_retry(
+          "GET", url, session=get_thread_session(), headers=self.headers, timeout=(5, 10), attempts=3,
+          rate_limiter=self.rate_limiter, stop_event=active_stop
+      )
+      if response is None or response.status_code != 200:
+        if response is not None:
+          print(f"      [!] Error de acceso (Status: {response.status_code})")
+        return {"url": url, "content": "", "quality": 0, "sha256": ""}
 
-      if response.status_code != 200:
-        print(f"      [!] Error de acceso (Status: {response.status_code})")
-        return ""
+      content_type = (response.headers.get("Content-Type") or "").lower()
+      is_pdf = url.lower().split("?", 1)[0].endswith(".pdf") or "application/pdf" in content_type
+      if is_pdf:
+        if not allow_pdf:
+          return {"url": url, "content": "", "quality": 0, "sha256": "", "type": "pdf_skipped"}
+        if len(response.content) > 15_000_000:
+          print("      [!] PDF demasiado grande; descartado para proteger el rendimiento.")
+          return {"url": url, "content": "", "quality": 0, "sha256": "", "type": "pdf"}
+        try:
+          from io import BytesIO
+          from pypdf import PdfReader
+          reader = PdfReader(BytesIO(response.content))
+          pages = []
+          for page in reader.pages:
+            if active_stop and active_stop.is_set():
+              break
+            pages.append(page.extract_text() or "")
+          content = self.clean_text_preserving_code("\n\n".join(pages))
+          return {
+              "url": url, "content": content, "quality": quality_score(content),
+              "sha256": content_hash(content) if content else "", "status": response.status_code,
+              "bytes": len(response.content), "type": "pdf", "pages": len(reader.pages),
+          }
+        except Exception as exc:
+          print(f"      [!] Error leyendo PDF: {exc}")
+          return {"url": url, "content": "", "quality": 0, "sha256": "", "type": "pdf"}
 
-      soup = BeautifulSoup(response.text, "html.parser")
+      if len(response.content) > 2_000_000:
+        print("      [!] Página demasiado grande; descartada para proteger el rendimiento.")
+        return {"url": url, "content": "", "quality": 0, "sha256": ""}
 
-      # Paso 1: Localiza etiquetas <pre> y <code> para transformarlas a bloques Markdown
-      # Esto evita que el contenido técnico o de programación se pierda durante la limpieza.
+      parser = "lxml"
+      try:
+        soup = BeautifulSoup(response.content, parser)
+      except Exception:
+        soup = BeautifulSoup(response.text, "html.parser")
+
       for pre in soup.find_all(["pre", "code"]):
         if pre.name == "code" and pre.find_parent("pre"):
           continue
         code_content = pre.get_text()
         pre.replace_with(f"\n\n```\n{code_content}\n```\n\n")
 
-      # Paso 2: Descompone/elimina etiquetas HTML estructurales que no contienen texto útil para datasets
-      for element in soup([
-          "script",
-          "style",
-          "nav",
-          "footer",
-          "header",
-          "aside",
-          "form",
-          "iframe",
-          "noscript",
-          "menu",
-      ]):
+      for element in soup(["script", "style", "nav", "footer", "header", "aside", "form", "iframe", "noscript", "menu"]):
         element.decompose()
 
-      # Paso 3: Extrae todo el texto plano restante del HTML y lo pasa por el filtro de limpieza
-      raw_text = soup.get_text()
-      return self.clean_text_preserving_code(raw_text)
+      # Boilerplate adicional: banners de cookies, anuncios, popups y barras laterales comunes.
+      boilerplate_re = re.compile(r"cookie|consent|advert|ads-|advertisement|banner|popup|modal|sidebar|social-share|newsletter", re.I)
+      for element in soup.find_all(attrs={"class": boilerplate_re}):
+        element.decompose()
+      for element in soup.find_all(attrs={"id": boilerplate_re}):
+        element.decompose()
 
+      raw_text = soup.get_text("\n")
+      content = self.clean_text_preserving_code(raw_text)
+      return {
+          "url": url,
+          "content": content,
+          "quality": quality_score(content),
+          "sha256": content_hash(content) if content else "",
+          "status": response.status_code,
+          "bytes": len(response.content),
+      }
     except Exception as e:
       print(f"      [!] Error al raspar {url}: {e}")
-      return ""
+      return {"url": url, "content": "", "quality": 0, "sha256": ""}

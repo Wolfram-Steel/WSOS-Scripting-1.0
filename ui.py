@@ -7,6 +7,7 @@ import threading
 import time
 import flet as ft
 from scraping import IntegratedCodeScraper
+from core.dataset import PROFILES, OBJECTIVES
 
 
 class ScraperUI:
@@ -39,7 +40,7 @@ class ScraperUI:
 
   def build_layout(self):
     banner_text = ft.Text(
-        "WSOS SCRIPTING 1.11",
+        "WSOS SCRIPTING 1.12",
         size=20,
         weight=ft.FontWeight.BOLD,
         color=ft.Colors.RED_700,
@@ -94,6 +95,52 @@ class ScraperUI:
         border_color=ft.Colors.RED_400,
     )
 
+    # Identidad y perfil del dataset: datos persistentes en el manifiesto WSOS.
+    self.profile_dropdown = ft.Dropdown(
+        label="Perfil de recopilación", value="Equilibrado",
+        options=[ft.dropdown.Option(name) for name in PROFILES.keys()],
+        visible=is_init_zero, border_color=ft.Colors.BLUE_400,
+    )
+    self.objective_dropdown = ft.Dropdown(
+        label="Objetivo del dataset", value="Investigación",
+        options=[ft.dropdown.Option(name) for name in OBJECTIVES],
+        visible=is_init_zero, border_color=ft.Colors.BLUE_400,
+    )
+    self.txt_project = ft.TextField(
+        label="Proyecto / Project ID", hint_text="ej. INF-NUMS-MATH",
+        visible=is_init_zero, width=185, border_color=ft.Colors.CYAN_400,
+    )
+    self.txt_author = ft.TextField(
+        label="Autor", hint_text="Tu nombre",
+        visible=is_init_zero, width=185, border_color=ft.Colors.GREEN_400,
+    )
+    self.txt_organization = ft.TextField(
+        label="Organización", hint_text="Opcional",
+        visible=is_init_zero, width=185, border_color=ft.Colors.AMBER_400,
+    )
+    self.txt_license = ft.TextField(
+        label="Licencia", hint_text="ej. CC BY 4.0",
+        visible=is_init_zero, width=185, border_color=ft.Colors.PURPLE_400,
+    )
+    self.txt_language = ft.Dropdown(
+        label="Idioma", value="es", width=150, visible=is_init_zero,
+        options=[
+            ft.dropdown.Option("es", "Español"),
+            ft.dropdown.Option("en", "English"),
+            ft.dropdown.Option("fr", "Français"),
+            ft.dropdown.Option("de", "Deutsch"),
+            ft.dropdown.Option("it", "Italiano"),
+            ft.dropdown.Option("pt", "Português"),
+        ],
+        border_color=ft.Colors.TEAL_400,
+    )
+    self.txt_description = ft.TextField(
+        label="Descripción del dataset",
+        hint_text="Describe para qué se recopila este material",
+        visible=is_init_zero, multiline=True, min_lines=1, max_lines=3, width=760,
+        border_color=ft.Colors.BLUE_GREY_400,
+    )
+
     self.target_category_dropdown = ft.Dropdown(
         label="Categoría de destino (Obligatoria para guardar)",
         hint_text="Selecciona dónde guardar las webs encontradas...",
@@ -127,6 +174,11 @@ class ScraperUI:
         ),
     )
 
+    self.pdf_checkbox = ft.Checkbox(
+        label="Añadir PDF", value=False, visible=is_init_zero,
+        tooltip="Incluye PDFs en el dataset. Puede aumentar el tiempo de procesamiento.",
+    )
+
     self.dirty_mode_checkbox = ft.Checkbox(
         label="Búsqueda Sucia",
         value=False,
@@ -143,6 +195,7 @@ class ScraperUI:
         controls=[
             self.wsos_mode_checkbox,
             self.dirty_mode_checkbox,
+            self.pdf_checkbox,
         ],
         spacing=15,
         visible=is_init_zero,
@@ -150,6 +203,10 @@ class ScraperUI:
 
     self.progress_bar = ft.ProgressBar(
         value=0, color=ft.Colors.RED_500, bgcolor=ft.Colors.GREY_800, visible=False
+    )
+
+    self.stats_text = ft.Text(
+        "Dataset: pendiente de ejecución", size=12, color=ft.Colors.GREY_400, visible=True
     )
 
     self.btn_run = ft.ElevatedButton(
@@ -202,18 +259,39 @@ class ScraperUI:
         expand=True,
     )
 
-    main_column = ft.Column(
+    # El formulario mantiene un ancho fijo para que maximizar la ventana no
+    # desplace los controles de categoría y metadatos. La consola es la zona
+    # que absorbe el espacio adicional.
+    form_column = ft.Column(
         controls=[
-            banner_text,
-            ft.Divider(),
             top_row_operations,
             self.txt_keywords,
             self.txt_output_file,
             self.region_dropdown,
+            ft.Row(controls=[self.profile_dropdown, self.objective_dropdown], spacing=10),
+            ft.Row(controls=[self.txt_project, self.txt_author, self.txt_organization, self.txt_license], spacing=8),
+            ft.Row(controls=[self.txt_language], spacing=8),
+            self.txt_description,
             self.target_category_dropdown,
             self.advanced_modes_row,
             self.progress_bar,
+            self.stats_text,
             action_buttons,
+        ],
+        width=760,
+        spacing=10,
+    )
+
+    form_area = ft.Row(
+        controls=[form_column],
+        alignment=ft.MainAxisAlignment.START,
+    )
+
+    main_column = ft.Column(
+        controls=[
+            banner_text,
+            ft.Divider(),
+            form_area,
             ft.Text("Consola de Ejecución:", weight=ft.FontWeight.BOLD),
             console_container,
         ],
@@ -404,6 +482,9 @@ class ScraperUI:
     self.region_dropdown.visible = is_option_zero
     self.target_category_dropdown.visible = is_option_zero
     self.advanced_modes_row.visible = is_option_zero
+    for control in (self.profile_dropdown, self.objective_dropdown, self.txt_author,
+                    self.txt_project, self.txt_organization, self.txt_license, self.txt_language, self.txt_description):
+      control.visible = is_option_zero
     self.page.update()
 
   def log_message(self, message: str):
@@ -420,6 +501,34 @@ class ScraperUI:
           ft.Text(message, font_family="Consolas", size=12)
       )
       self.log_view.update()
+
+  def update_progress(self, completed, total, label=""):
+    """Actualiza de forma segura la barra de progreso desde el hilo de trabajo."""
+    try:
+      value = 0 if total <= 0 else min(1.0, completed / total)
+      self.progress_bar.value = value
+      if label:
+        self.progress_bar.tooltip = label
+      self.page.update()
+    except Exception:
+      pass
+
+  def update_stats(self, metadata, stats):
+    """Muestra la identidad y métricas del último dataset generado."""
+    text = (
+        f"Dataset {metadata.get('dataset_id', '-')} | "
+        f"Run {metadata.get('run_id', '-')} | "
+        f"{stats.get('documents_accepted', 0)} docs | "
+        f"{stats.get('duplicates', 0)} duplicados | "
+        f"{stats.get('characters', 0):,} caracteres | "
+        f"Q {stats.get('average_quality', 0)}/100 | "
+        f"{stats.get('urls_per_second', 0)} URL/s"
+    )
+    self.stats_text.value = text
+    try:
+      self.stats_text.update()
+    except Exception:
+      pass
 
   def open_output_folder(self, e):
     current_path = os.getcwd()
@@ -448,7 +557,7 @@ class ScraperUI:
     self.btn_open_folder.disabled = True
     self.btn_stop.disabled = False
     self.progress_bar.visible = True
-    self.progress_bar.value = None
+    self.progress_bar.value = 0
     self.btn_run.scale = 0.93
     self.page.update()
 
@@ -476,7 +585,7 @@ class ScraperUI:
 
   def _execute_task(self, choice):
     self._run_with_captured_stdout(
-        lambda: self.scraper.run_category_gui(choice, self.stop_event)
+        lambda: self.scraper.run_category_gui(choice, self.stop_event, self.update_progress)
         if choice != "0"
         else self._execute_custom_search()
     )
@@ -509,6 +618,17 @@ class ScraperUI:
           region=region_code,
           stop_event=self.stop_event,
           save_category=target_category,
+          progress_callback=self.update_progress,
+          profile=self.profile_dropdown.value or "Equilibrado",
+          author=self.txt_author.value or "",
+          project=self.txt_project.value or "",
+          organization=self.txt_organization.value or "",
+          description=self.txt_description.value or "",
+          language=self.txt_language.value or "es",
+          objective=self.objective_dropdown.value or "Investigación",
+          stats_callback=self.update_stats,
+          allow_pdf=bool(self.pdf_checkbox.value),
+          license_name=self.txt_license.value or "",
       )
 
   def _run_with_captured_stdout(self, target_func):

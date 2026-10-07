@@ -8,11 +8,13 @@ import time
 import requests
 
 from core import bloqueos, buscadores, categorias
+from core.red import RateLimiter, DomainRateLimiter
+from core.dataset import PROFILES, OBJECTIVES, build_metadata, normalize_url, write_manifest
 
 # Workers concurrentes para búsqueda anidada (keywords en paralelo)
 MAX_SEARCH_WORKERS = 8
 # Workers concurrentes para descarga de páginas (dataset / categorías)
-MAX_SCRAPE_WORKERS = 6
+MAX_SCRAPE_WORKERS = 10
 
 
 # Habilitar soporte para colores ANSI en la terminal de Windows
@@ -157,12 +159,24 @@ class IntegratedCodeScraper:
       region="es-es",
       stop_event=None,
       save_category=None,
+      progress_callback=None,
+      profile="Equilibrado",
+      author="",
+      project="",
+      organization="",
+      description="",
+      language="es",
+      objective="Investigación",
+      stats_callback=None,
+      allow_pdf=False,
+      license_name="",
   ):
     """Realiza una búsqueda personalizada utilizando la región especificada.
 
     Si dirty_mode está activado, realiza pasadas masivas encadenadas para raspar
     cientos de URLs a cascoporro.
     """
+    run_started = time.monotonic()
     # Asignar la región elegida al motor de búsqueda
     self.search_engine.region = region
 
@@ -227,20 +241,22 @@ class IntegratedCodeScraper:
         return []
       # Cada hilo usa su propia instancia de motor para evitar conflictos
       engine = buscadores.MultiSearchEngine(
-          region=region, safesearch=self.search_engine.safesearch
+          region=region, safesearch=self.search_engine.safesearch,
+          rate_limiter=search_rate_limiter, stop_event=stop_event
       )
       return engine.fetch_urls_with_fallbacks(kw, max_results=max_res)
 
     # --- Búsqueda anidada: todas las keywords en paralelo ---
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-      future_map = {
-          executor.submit(_search_one, kw): kw for kw in keywords_list
-      }
+    search_rate_limiter = RateLimiter(0.20)
+    executor = ThreadPoolExecutor(max_workers=workers)
+    future_map = {executor.submit(_search_one, kw): kw for kw in keywords_list}
+    completed_searches = 0
+    try:
       for future in as_completed(future_map):
         if stop_event and stop_event.is_set():
-          # Cancelar pendientes y salir
           for f in future_map:
-            f.cancel()
+            if not f.done():
+              f.cancel()
           print("[!] Búsqueda detenida por el usuario.")
           break
         kw = future_map[future]
@@ -250,18 +266,30 @@ class IntegratedCodeScraper:
           print(f"  [✔] Término completado: '{kw}' → {len(urls)} enlaces")
         except Exception as exc:
           print(f"  [!] Error en término '{kw}': {exc}")
+        completed_searches += 1
+        if progress_callback:
+          progress_callback(completed_searches, len(keywords_list), f"Búsqueda: {completed_searches}/{len(keywords_list)}")
+    finally:
+      executor.shutdown(wait=False, cancel_futures=True)
 
-    # Aplicar filtrado o saltarlo por completo según la Búsqueda Sucia
-    if dirty_mode:
-      print("[⚠ BÚSQUEDA SUCIA] Consolidando aluvión masivo de enlaces...")
-      clean_urls = []
-      seen = set()
-      for u in all_found_urls:
-        if u and u.startswith(("http://", "https://")) and u not in seen:
-          seen.add(u)
-          clean_urls.append(u)
-    else:
-      clean_urls = self.url_filter.clean_and_validate(all_found_urls)
+    # Normalización + deduplicación temprana: evita trabajo de red redundante.
+    profile_cfg = PROFILES.get(profile, PROFILES["Equilibrado"])
+    print(f"[⚙] Perfil: {profile} | Objetivo: {objective} | Calidad mínima: {profile_cfg['quality_min']}")
+    normalized = []
+    seen = set()
+    source_urls = (
+        [u for u in all_found_urls if self.url_filter.is_supported_resource(u, allow_pdf=allow_pdf)]
+        if dirty_mode else self.url_filter.clean_and_validate(all_found_urls, allow_pdf=allow_pdf)
+    )
+    for u in source_urls:
+      if stop_event and stop_event.is_set():
+        break
+      nu = normalize_url(u)
+      if nu and nu.startswith(("http://", "https://")) and nu not in seen:
+        seen.add(nu)
+        normalized.append(nu)
+    clean_urls = normalized
+    print(f"[⚡] URLs únicas tras normalización: {len(clean_urls)}")
 
     # Guardar resultados en el archivo de salida base .txt
     try:
@@ -306,24 +334,25 @@ class IntegratedCodeScraper:
       )
       from core.procesador import WebProcessor
 
-      processor = WebProcessor()
+      processor = WebProcessor(stop_event=stop_event, rate_limiter=DomainRateLimiter(profile_cfg["rate_limit"]))
       dataset_filename = f"dataset_{'wsos' if wsos_mode else 'dirty'}_{output_filename}"
 
       def _scrape_one(url: str):
         if stop_event and stop_event.is_set():
-          return url, ""
-        return url, processor.scrape_url(url)
+          return {"url": url, "content": "", "quality": 0, "sha256": ""}
+        return processor.scrape_url_details(url, stop_event=stop_event, allow_pdf=allow_pdf)
 
       results = []
       scrape_workers = min(MAX_SCRAPE_WORKERS, max(1, len(clean_urls)))
-      with ThreadPoolExecutor(max_workers=scrape_workers) as executor:
-        futures = {
-            executor.submit(_scrape_one, url): url for url in clean_urls
-        }
+      executor = ThreadPoolExecutor(max_workers=scrape_workers)
+      futures = {executor.submit(_scrape_one, url): url for url in clean_urls}
+      completed_scrapes = 0
+      try:
         for future in as_completed(futures):
           if stop_event and stop_event.is_set():
             for f in futures:
-              f.cancel()
+              if not f.done():
+                f.cancel()
             print("[!] Pipeline detenido por el usuario.")
             break
           try:
@@ -331,25 +360,75 @@ class IntegratedCodeScraper:
           except Exception as exc:
             url = futures[future]
             print(f"  [!] Error al raspar {url}: {exc}")
-            results.append((url, ""))
+            results.append({"url": url, "content": "", "quality": 0, "sha256": ""})
+          completed_scrapes += 1
+          if progress_callback:
+            progress_callback(completed_scrapes, len(clean_urls), f"Dataset: {completed_scrapes}/{len(clean_urls)}")
+      finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
+      documents = []
+      accepted_hashes = set()
+      duplicates = 0
+      rejected_quality = 0
+      accepted = 0
       with open(dataset_filename, "w", encoding="utf-8") as ds_file:
         ds_file.write(
-            f"=== DATASET AUTOMÁTICO {mode_label} - KEYWORDS: {raw_keywords} ===\n\n"
+            f"=== DATASET AUTOMÁTICO {mode_label} - KEYWORDS: {raw_keywords} ===\n"
+            f"=== PERFIL: {profile} | OBJETIVO: {objective} ===\n\n"
         )
-        for url, content in results:
-          if content and len(content) > 300:
-            ds_file.write(f"\n\n--- FUENTE VALIDADA: {url} ---\n\n{content}")
+        for item in results:
+          url = item.get("url", "")
+          content = item.get("content", "")
+          quality = item.get("quality", 0)
+          digest = item.get("sha256", "")
+          if content and len(content) >= profile_cfg["min_chars"] and quality >= profile_cfg["quality_min"]:
+            if profile_cfg["deduplicate"] and digest in accepted_hashes:
+              duplicates += 1
+              continue
+            accepted_hashes.add(digest)
+            ds_file.write(f"\n\n--- FUENTE VALIDADA: {url} | QUALITY: {quality}/100 | SHA256: {digest} ---\n\n{content}")
             total_chars_dataset += len(content)
-            print(
-                f"  [✔ {mode_label} Relevante] Contenido integrado"
-                f" ({len(content)} caracteres)."
-            )
+            accepted += 1
+            documents.append({"url": url, "quality": quality, "sha256": digest, "chars": len(content)})
           else:
-            print(
-                f"  [✘ {mode_label} Descartado] Contenido insuficiente o poco relevante:"
-                f" {url}"
-            )
+            rejected_quality += 1
+            print(f"  [✘ {mode_label} Descartado] Calidad insuficiente ({quality}/100): {url}")
+
+      metadata = build_metadata(
+          author=author, project=project, organization=organization, description=description,
+          language=language, objective=objective, profile=profile, keywords=raw_keywords,
+          mode=mode_label, license_name=license_name,
+      )
+      elapsed = max(0.001, time.monotonic() - run_started)
+      total_bytes = sum(int(item.get("bytes", 0) or 0) for item in results)
+      avg_quality = round(sum(d["quality"] for d in documents) / max(1, len(documents)), 1)
+      stats = {
+          "urls_found": len(all_found_urls), "urls_unique": len(clean_urls),
+          "documents_accepted": accepted, "documents_rejected": rejected_quality,
+          "duplicates": duplicates, "characters": total_chars_dataset,
+          "quality_min": profile_cfg["quality_min"], "average_quality": avg_quality,
+          "download_bytes": total_bytes, "elapsed_seconds": round(elapsed, 2),
+          "urls_per_second": round(len(clean_urls) / elapsed, 2),
+          "pdf_enabled": bool(allow_pdf),
+      }
+      manifest_path = write_manifest(dataset_filename, metadata, stats, documents)
+      print(f"[+] Manifiesto WSOS generado: {manifest_path}")
+      print(f"[🆔] Dataset ID: {metadata['dataset_id']} | Run ID: {metadata['run_id']}")
+      print(f"[📊] Dataset: {accepted} válidos | {duplicates} duplicados | {rejected_quality} descartados | {total_chars_dataset} caracteres")
+      print("\n╔══════════════════════════════════════╗")
+      print("║          WSOS ENGINE REPORT          ║")
+      print("╠══════════════════════════════════════╣")
+      print(f"║ URLs encontradas : {len(all_found_urls):>16} ║")
+      print(f"║ URLs únicas      : {len(clean_urls):>16} ║")
+      print(f"║ Docs aceptados   : {accepted:>16} ║")
+      print(f"║ Duplicados       : {duplicates:>16} ║")
+      print(f"║ Calidad media    : {avg_quality:>15}/100 ║")
+      print(f"║ Velocidad        : {stats['urls_per_second']:>12} URL/s ║")
+      print(f"║ Tiempo           : {stats['elapsed_seconds']:>13} s ║")
+      print("╚══════════════════════════════════════╝")
+      if stats_callback:
+        stats_callback(metadata, stats)
 
       print(
           f"[+] ¡Dataset {mode_label} generado con éxito en"
@@ -363,7 +442,7 @@ class IntegratedCodeScraper:
     print(f"   • Caracteres totales añadidos al dataset: {total_chars_dataset}")
     print("=" * 50 + "\n")
 
-  def run_category_gui(self, selected_category, stop_event=None):
+  def run_category_gui(self, selected_category, stop_event=None, progress_callback=None):
     """Ejecuta el scraping midiendo el tiempo transcurrido y delegando en el módulo unificado de categorías."""
     categories = self.load_config()
     urls_to_sample = categories.get(selected_category, [])
@@ -376,7 +455,7 @@ class IntegratedCodeScraper:
 
     try:
       categorias.run_category_scraping(
-          selected_category, urls_to_sample, stop_event
+          selected_category, urls_to_sample, stop_event, progress_callback
       )
       elapsed = time.time() - start_time
       print(

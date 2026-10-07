@@ -2,18 +2,20 @@
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .procesador import WebProcessor
+from .red import DomainRateLimiter
 
 # Workers concurrentes para descarga de páginas por categoría
 MAX_CATEGORY_WORKERS = 6
 
 
-def run_category_scraping(selected_category: str, urls_to_scrape: list, stop_event=None):
+def run_category_scraping(selected_category: str, urls_to_scrape: list, stop_event=None, progress_callback=None):
   """Ejecuta el scraping y fraccionamiento para cualquier categoría de forma unificada.
 
   Las descargas HTTP se lanzan en paralelo (anidadas); la escritura a disco
   se hace al final en orden para mantener el particionado por líneas.
   """
-  processor = WebProcessor()
+  rate_limiter = DomainRateLimiter(0.20)
+  processor = WebProcessor(stop_event=stop_event, rate_limiter=rate_limiter)
   cat_lower = selected_category.lower()
 
   # Mapeo inteligente del nombre del archivo base de salida
@@ -43,7 +45,7 @@ def run_category_scraping(selected_category: str, urls_to_scrape: list, stop_eve
   def _scrape_one(url: str):
     if stop_event and stop_event.is_set():
       return url, ""
-    return url, processor.scrape_url(url)
+    return url, processor.scrape_url(url, stop_event=stop_event)
 
   workers = min(MAX_CATEGORY_WORKERS, max(1, len(urls_to_scrape)))
   print(f"[⚡] {workers} workers concurrentes descargando páginas...")
@@ -52,14 +54,15 @@ def run_category_scraping(selected_category: str, urls_to_scrape: list, stop_eve
   ordered_results = [None] * len(urls_to_scrape)
   url_to_index = {url: i for i, url in enumerate(urls_to_scrape)}
 
-  with ThreadPoolExecutor(max_workers=workers) as executor:
-    futures = {
-        executor.submit(_scrape_one, url): url for url in urls_to_scrape
-    }
+  executor = ThreadPoolExecutor(max_workers=workers)
+  futures = {executor.submit(_scrape_one, url): url for url in urls_to_scrape}
+  completed = 0
+  try:
     for future in as_completed(futures):
       if stop_event and stop_event.is_set():
         for f in futures:
-          f.cancel()
+          if not f.done():
+            f.cancel()
         print("[!] Proceso detenido por el usuario.")
         break
       url = futures[future]
@@ -69,6 +72,11 @@ def run_category_scraping(selected_category: str, urls_to_scrape: list, stop_eve
       except Exception as exc:
         print(f"      [!] Error al raspar {url}: {exc}")
         ordered_results[url_to_index[url]] = (url, "")
+      completed += 1
+      if progress_callback:
+        progress_callback(completed, len(urls_to_scrape), f"Descarga: {completed}/{len(urls_to_scrape)}")
+  finally:
+    executor.shutdown(wait=False, cancel_futures=True)
 
   # --- Fase 2: escritura secuencial con particionado por líneas ---
   part_num = 1
@@ -82,6 +90,9 @@ def run_category_scraping(selected_category: str, urls_to_scrape: list, stop_eve
   current_lines_in_file = 2
 
   for item in ordered_results:
+    if stop_event and stop_event.is_set():
+      print("[!] Escritura final detenida por el usuario.")
+      break
     if item is None:
       continue
     url, content = item

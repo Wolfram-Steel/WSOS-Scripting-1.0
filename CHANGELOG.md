@@ -7,6 +7,36 @@ y este proyecto sigue [Versionado Semántico](https://semver.org/lang/es/).
 
 ---
 
+## [1.12.0] — 2026-10-07
+
+### Robustez y control
+### Motor y trazabilidad
+
+- Perfiles de recopilación: **Rápido**, **Equilibrado**, **Seguro** y **Dataset IA**.
+- Objetivo del dataset configurable y metadatos personales/proyecto: autor, proyecto, organización, idioma y descripción.
+- `Dataset ID` y `Run ID` únicos por ejecución.
+- Quality Score 0–100 por documento.
+- SHA-256 del contenido y deduplicación por hash.
+- Normalización de URLs antes del scraping.
+- Manifiesto `.wsos.json` con identidad, estadísticas y documentos aceptados.
+- Estadísticas finales visibles en la interfaz.
+- `lxml` como parser preferente con fallback seguro.
+- Dependencia `lxml` añadida al auto-configurador.
+
+
+- Parada cooperativa reforzada con checkpoints en búsqueda y scraping.
+- Los futures pendientes se cancelan y los ejecutores se cierran sin bloquear la interfaz.
+- Timeouts HTTP explícitos para evitar esperas indefinidas.
+- Rate limiting compartido entre workers.
+- Reintentos con exponential backoff y jitter para errores transitorios.
+- Barra de progreso determinada conectada al número real de tareas completadas.
+- El procesamiento web comparte la señal de parada con las peticiones HTTP.
+
+### Compatibilidad
+
+- Se mantiene `ThreadPoolExecutor`; no se introduce `asyncio` en esta versión.
+- Se mantiene la estructura general de WSOS Scripting 1.11.
+
 ## [1.11.0] — 2026-10-07
 
 ### Resumen
@@ -134,3 +164,13 @@ webs.json        → persistencia
 [1.11.0]: https://github.com/<usuario>/<repo>/compare/v1.1.0...v1.11.0  
 [1.1.0]: https://github.com/<usuario>/<repo>/compare/v1.0.0...v1.1.0  
 [1.0.0]: https://github.com/<usuario>/<repo>/releases/tag/v1.0.0
+
+
+### Refinamiento 1.12
+- `requests.Session()` persistente por worker con pooling/keep-alive.
+- Rate limiting independiente por dominio.
+- Filtrado temprano de extensiones binarias.
+- Soporte PDF opcional mediante `pypdf`.
+- Limpieza ampliada de boilerplate (cookies, anuncios, popups y sidebars).
+- Campo de licencia en los metadatos del dataset.
+- WSOS Engine Report con calidad media, velocidad y tiempo.
