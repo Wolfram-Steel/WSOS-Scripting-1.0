@@ -1,0 +1,9 @@
+# WSOS Scripting 1.12c - dependencias
+# Los límites inferiores son orientativos: si tu entorno ya funciona, fija las versiones
+# exactas con `pip freeze` para reproducir la instalación.
+flet>=0.28
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+pypdf>=4.0
+ddgs>=9.0
